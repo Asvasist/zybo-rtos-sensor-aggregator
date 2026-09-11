@@ -1,0 +1,30 @@
+# ---- Vivado ----
+hw/build/
+hw/export/
+.Xil/
+*.jou
+*.log
+*.str
+*.backup.*
+vivado_pid*.zip
+
+# ---- Vitis (only the application sources are tracked) ----
+**/workspace/
+.metadata/
+_ide/
+.analytics
+RemoteSystemsTempFiles/
+Debug/
+Release/
+build/
+*.elf
+*.elf.size
+*.o
+*.d
+*.map
+
+# ---- editors / OS ----
+.vscode/
+*.swp
+Thumbs.db
+desktop.ini

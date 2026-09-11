@@ -1,1 +1,0 @@
-# zybo-rtos-sensor-aggregator
