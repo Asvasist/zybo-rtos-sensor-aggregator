@@ -13,7 +13,7 @@
 #include "FreeRTOS.h"
 #include "task.h"
 
-#define APP_FW_VERSION              "0.2.0"
+#define APP_FW_VERSION              "0.3.0"
 
 /* ---- sampling -------------------------------------------------------- */
 
@@ -26,11 +26,43 @@
  */
 #define APP_SAMPLE_TIMEOUT_MS       ((3U * 1000U) / APP_SAMPLE_RATE_HZ)
 
+/* ---- sensor log (ring buffer in DDR) ----------------------------------
+ *
+ * Capacity must be a power of two. 4096 records x 32 bytes = 128 KiB, which
+ * holds 409.6 s (about 6.8 minutes) of samples at 10 Hz before the oldest get
+ * overwritten. Drop it to 256 (25.6 s) to see overwriting quickly on the
+ * bench.
+ */
+#define APP_LOG_CAPACITY            4096U
+
+/*
+ * Mutex waits. The producer's is kept far below one sample period: a reader
+ * that sits on the lock may cost it a sample, but never its timing. The
+ * consumer has nothing time-critical and can afford to wait longer.
+ */
+#define APP_LOG_WRITE_WAIT_MS       20U
+#define APP_LOG_READ_WAIT_MS        100U
+
+/* Records copied per lock. Bounds the mutex hold time on the read side. */
+#define APP_LOG_READ_BATCH          16U
+
+/* Batches per consumer pass before it looks at its queue again. */
+#define APP_LOG_DRAIN_BATCHES_MAX   4U
+
+/*
+ * Bring-up only, 0 in normal builds: busy-wait this many microseconds while
+ * holding the log mutex on every read, to make lock contention and priority
+ * inheritance visible. The banner warns when it is non-zero.
+ */
+#define APP_TEST_LOG_HOLD_US        0U
+
 /* ---- consumer -------------------------------------------------------- */
 
+#define APP_CONSUMER_QUEUE_LEN      16U     /* control messages, not data - samples live in the log      */
+#define APP_CONSUMER_POLL_MS        250U    /* longest gap between log drains, even without a doorbell    */
 #define APP_HEARTBEAT_SAMPLES       5U      /* LD4 toggles every 5 samples: 1 Hz blink at 10 Hz sampling */
 #define APP_SLOW_STREAM_DIVIDER     10U     /* slow stream mode prints every 10th sample                 */
-#define APP_STALL_WARN_MS           1000U   /* no sample for this long -> warning on the console          */
+#define APP_STALL_WARN_MS           1000U   /* producer made no progress this long -> console warning     */
 
 /* ---- UI -------------------------------------------------------------- */
 

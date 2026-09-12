@@ -76,4 +76,16 @@
  * ------------------------------------------------------------------------- */
 #define BOARD_SAMPLE_TTC_IRQ        XPS_TTC0_1_INT_ID
 
+/* -------------------------------------------------------------------------
+ * Memory map
+ *
+ * DDR as the Cortex-A9s see it (UG585, system address map): at most
+ * 0x0010_0000 to 0x3FFF_FFFF. The Zybo's 512 MB and the Zybo Z7's 1 GB both
+ * sit inside that window; the bottom megabyte is left out because OCM can be
+ * mapped there. Only used as a sanity check that the sensor log really did
+ * get linked into DDR.
+ * ------------------------------------------------------------------------- */
+#define BOARD_DDR_BASE_ADDR         0x00100000UL
+#define BOARD_DDR_HIGH_ADDR         0x3FFFFFFFUL
+
 #endif /* BOARD_ZYBO_H */
