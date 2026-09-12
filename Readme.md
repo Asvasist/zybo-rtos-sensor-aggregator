@@ -20,7 +20,7 @@ Firmware first, entirely on the PS. The PL design comes last, once the software 
 | Stage | Scope | Folder | Status |
 |-------|-------|--------|--------|
 | 1 | Bare-metal drivers: UART, MIO GPIO, XADC; temperature on the terminal | `sw/stage1_baremetal_drivers` | Code complete, board bring-up pending |
-| 2 | FreeRTOS: timer-paced producer (100 ms XADC), consumer printing over UART | - | Planned |
+| 2 | FreeRTOS: timer-paced producer (100 ms XADC), consumer printing over UART | `sw/stage2_freertos_tasks` | Code complete, board bring-up pending |
 | 3 | Ring buffer in DDR, mutex protection, queue between tasks | - | Planned |
 | 4 | Zynq hardware watchdog + dedicated kick task, hang detection | - | Planned |
 | 5 | PL design: AXI GPIO for SW0-3 / BTN0-3, full hardware platform | `hw/` | Planned |
@@ -37,7 +37,15 @@ sw/
   stage1_baremetal_drivers/
     Readme.md
     src/                         application sources (drop into a Vitis app)
+  stage2_freertos_tasks/
+    Readme.md
+    src/                         FreeRTOS application sources
 ```
+
+Each stage is a complete, self-contained application source tree, so any
+stage can be built and run on its own. Drivers are carried forward from the
+previous stage and changed in place; the commit history shows exactly what
+changed and why.
 
 Build outputs (Vivado project, XSA, Vitis workspace) are not tracked - they
 are regenerated from the scripts and sources.
