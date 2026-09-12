@@ -14,7 +14,6 @@
 
 #include "xadcps.h"
 #include "xstatus.h"
-#include "sleep.h"
 
 #include "board_zybo.h"
 
@@ -35,13 +34,6 @@
 #define XADC_TEMP_GAIN_MILLI        503975UL
 #define XADC_TEMP_OFFSET_MILLI      273150L
 #define XADC_SUPPLY_FS_MV           3000UL
-
-/*
- * Time for the first averaged results to land after the sequencer starts.
- * One pass over these channels with 16x averaging is well under a millisecond,
- * so this is plenty of margin and only costs anything once, at boot.
- */
-#define XADC_FIRST_RESULT_WAIT_US   20000U
 
 /* Channels the sequencer converts. CALIB keeps the offset/gain coefficients fresh. */
 #define XADC_SEQ_CHANNELS           (XADCPS_SEQ_CH_CALIB   | XADCPS_SEQ_CH_TEMP    | \
@@ -132,7 +124,13 @@ xadc_drv_status_t xadc_drv_init(void)
 
     XAdcPs_SetSequencerMode(&s_xadc_inst, XADCPS_SEQ_MODE_CONTINPASS);
 
-    usleep(XADC_FIRST_RESULT_WAIT_US);
+    /*
+     * Stage 1 slept here until the first averaged results landed. Not needed
+     * any more: the first read comes one sample period (100 ms) after the
+     * scheduler starts, long after the sequencer's first pass. Dropping it
+     * also removes the dependency on usleep(), whose behaviour differs
+     * between the standalone and FreeRTOS BSPs.
+     */
 
     s_xadc_ready = true;
     return XADC_DRV_OK;

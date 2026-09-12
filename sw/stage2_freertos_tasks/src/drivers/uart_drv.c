@@ -176,6 +176,11 @@ void uart_drv_get_err_counters(uart_drv_err_counters_t *counters_out)
         return;
     }
 
-    uart_collect_line_errors();
+    /*
+     * No uart_collect_line_errors() here any more. Collecting is a read plus
+     * write-to-clear of the status register and has to stay with the RX
+     * owner. Worst case the copy is torn by one increment, which doesn't
+     * matter for a diagnostic.
+     */
     *counters_out = s_err_counters;
 }

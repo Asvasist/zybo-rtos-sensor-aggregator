@@ -5,9 +5,10 @@
  * translation, plus a fixed-point formatter so the firmware never needs
  * float support in printf.
  *
- * Not reentrant - one shared format buffer. That's fine in the stage 1
- * super-loop; under FreeRTOS the console gets its own mutex (or a single
- * owner task) before more than one task is allowed to print.
+ * Not reentrant - one shared format buffer. In stage 2 that's handled by
+ * ownership: main() prints before the scheduler starts, after that only the
+ * consumer task does. The fault handler uses console_write() only, never the
+ * formatted functions, so it can't collide with a half-built line.
  */
 #ifndef CONSOLE_H
 #define CONSOLE_H

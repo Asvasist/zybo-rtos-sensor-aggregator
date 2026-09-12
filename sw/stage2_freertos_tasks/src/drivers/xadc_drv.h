@@ -14,6 +14,11 @@
  * Results are handled as raw 12-bit codes and only converted to engineering
  * units at the point of display. That keeps the sampling side cheap and a
  * sample record small, which matters once samples go into the ring buffer.
+ *
+ * Not reentrant: every register read is a command/response exchange over the
+ * XADCIF FIFOs. Once the scheduler is running the producer task is the only
+ * caller of the read functions. The conversion and name helpers are pure and
+ * can be used from anywhere.
  */
 #ifndef XADC_DRV_H
 #define XADC_DRV_H

@@ -15,6 +15,7 @@
 #define BOARD_ZYBO_H
 
 #include "xparameters.h"
+#include "xparameters_ps.h"
 
 /* -------------------------------------------------------------------------
  * Driver instance selection
@@ -24,15 +25,20 @@
  *
  * The Zybo board preset only enables UART1, so it is instance 0 in both flows.
  * If a second PS UART is ever enabled, re-check this against xparameters.h.
+ *
+ * TTC instances are numbered per counter: TTC0 counters 0/1/2 are instances
+ * 0/1/2, TTC1 (if enabled) follows as 3/4/5.
  * ------------------------------------------------------------------------- */
 #ifndef SDT
 #define BOARD_CONSOLE_UART_ID       XPAR_XUARTPS_0_DEVICE_ID
 #define BOARD_PS_GPIO_ID            XPAR_XGPIOPS_0_DEVICE_ID
 #define BOARD_XADC_ID               XPAR_XADCPS_0_DEVICE_ID
+#define BOARD_SAMPLE_TTC_ID         XPAR_XTTCPS_1_DEVICE_ID
 #else
 #define BOARD_CONSOLE_UART_ID       XPAR_XUARTPS_0_BASEADDR
 #define BOARD_PS_GPIO_ID            XPAR_XGPIOPS_0_BASEADDR
 #define BOARD_XADC_ID               XPAR_XADCPS_0_BASEADDR
+#define BOARD_SAMPLE_TTC_ID         XPAR_XTTCPS_1_BASEADDR
 #endif
 
 /* -------------------------------------------------------------------------
@@ -56,5 +62,18 @@
 #define BOARD_MIO_LED4              7U
 #define BOARD_MIO_BTN4              50U
 #define BOARD_MIO_BTN5              51U
+
+/* -------------------------------------------------------------------------
+ * Sample timer
+ *
+ * TTC0 counter 1 (ps7_ttc_1), GIC SPI ID 43, level sensitive.
+ *
+ * Counter 0 is left alone on purpose: depending on the BSP version and its
+ * settings it can get claimed as the sleep timer or tick source, and two
+ * owners of one counter is a miserable bug to chase.
+ *
+ * TTC0 has to be enabled in the PS configuration - hw/scripts does that.
+ * ------------------------------------------------------------------------- */
+#define BOARD_SAMPLE_TTC_IRQ        XPS_TTC0_1_INT_ID
 
 #endif /* BOARD_ZYBO_H */

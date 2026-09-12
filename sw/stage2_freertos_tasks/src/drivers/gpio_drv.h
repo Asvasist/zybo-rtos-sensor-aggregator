@@ -11,6 +11,13 @@
  * A press is latched as an event on the released->pressed transition, so the
  * application can't miss a short press between two polls and never sees the
  * same press twice.
+ *
+ * Task usage under FreeRTOS:
+ *   - gpio_drv_btn_scan() and gpio_drv_btn_take_press(): UI task only
+ *   - gpio_drv_btn_is_down(): any task, it's a single bool written by the scan
+ *   - LED functions: consumer task only (and the fault handler)
+ * Pin writes go through the MIO mask-data register, so the LED and the button
+ * inputs never do a read-modify-write on a shared register.
  */
 #ifndef GPIO_DRV_H
 #define GPIO_DRV_H

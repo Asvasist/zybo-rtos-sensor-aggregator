@@ -3,10 +3,17 @@
  *
  * Polled driver for the PS UART used as the system console.
  *
- * Stage 1 runs everything from a super-loop, so this is deliberately simple:
- * TX blocks while the FIFO is full, RX is a non-blocking poll. When FreeRTOS
- * comes in, TX goes behind a mutex and RX moves to the UART interrupt; the
- * API is kept narrow so the callers don't have to change when that happens.
+ * TX blocks while the FIFO is full, RX is a non-blocking poll, the UART
+ * interrupt stays off.
+ *
+ * The driver holds no locks. Under FreeRTOS it relies on one owner per
+ * direction instead:
+ *   - TX: the consumer task only (plus the fault handler, which masks
+ *         interrupts before it writes anything)
+ *   - RX: the UI task only, which is also where the line error flags get
+ *         collected
+ * The two directions use different registers, so the owners don't need to
+ * coordinate with each other.
  */
 #ifndef UART_DRV_H
 #define UART_DRV_H
@@ -53,6 +60,10 @@ bool uart_drv_try_get_char(char *ch_out);
  */
 void uart_drv_wait_tx_idle(void);
 
+/*
+ * Snapshot of the counters as of the last RX poll. Doesn't touch the
+ * hardware, so any task can call it without stepping on the RX owner.
+ */
 void uart_drv_get_err_counters(uart_drv_err_counters_t *counters_out);
 
 #endif /* UART_DRV_H */

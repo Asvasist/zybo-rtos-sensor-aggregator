@@ -160,9 +160,9 @@ bool gpio_drv_btn_take_press(gpio_btn_id_t btn)
     }
 
     /*
-     * Read-then-clear is fine while scan and take run in the same context
-     * (super-loop). Once the scan moves into a timer ISR this needs to become
-     * an atomic exchange or run with the timer interrupt masked.
+     * Plain read-then-clear. Safe only because the scan and the take both
+     * run in the UI task. If the scan ever moves into an ISR or a different
+     * task, this has to become an atomic exchange.
      */
     pressed = s_btn_state[btn].press_latched;
     s_btn_state[btn].press_latched = false;
