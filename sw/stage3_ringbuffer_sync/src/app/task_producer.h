@@ -9,8 +9,9 @@
  * XADCIF command/response exchanges) happen here at task level. That keeps
  * the ISR a few instructions long and the slow part pre-emptible.
  *
- * Each sample is posted to the sensor mailbox and the consumer is notified.
- * The producer never waits on the consumer and never prints.
+ * Each sample goes into the sensor log (ring buffer in DDR, mutex). When the
+ * log was empty before the write, the consumer gets a DATA_READY doorbell
+ * on its queue. The producer never waits long for anything and never prints.
  */
 #ifndef TASK_PRODUCER_H
 #define TASK_PRODUCER_H
@@ -25,14 +26,17 @@
 
 typedef struct
 {
-    uint32_t      timer_period_us;  /* actual TTC period                                 */
-    uint32_t      samples;          /* samples taken since start                         */
-    uint32_t      overruns;         /* timer ticks that arrived while still busy         */
-    uint32_t      timeouts;         /* waits in which no tick arrived at all             */
-    uint32_t      period_min_us;    /* shortest / longest time between two wake-ups,     */
-    uint32_t      period_max_us;    /*   valid once samples >= 2                         */
-    uint32_t      read_time_max_us; /* longest wake-to-post time (XADC reads + handoff)  */
-    xadc_sample_t sensor_min;       /* per-sensor extremes over every sample taken       */
+    uint32_t      timer_period_us;  /* actual TTC period                                     */
+    uint32_t      samples;          /* samples taken since start                             */
+    uint32_t      overruns;         /* timer ticks that arrived while still busy             */
+    uint32_t      timeouts;         /* waits in which no tick arrived at all                 */
+    uint32_t      period_min_us;    /* shortest / longest time between two wake-ups,         */
+    uint32_t      period_max_us;    /*   valid once samples >= 2                             */
+    uint32_t      read_time_max_us; /* longest XADC + button read                            */
+    uint32_t      log_write_max_us; /* longest log write, including the wait for the mutex   */
+    uint32_t      log_write_drops;  /* samples lost because the mutex wasn't free in time    */
+    uint32_t      doorbell_retries; /* DATA_READY sends that found the consumer queue full   */
+    xadc_sample_t sensor_min;       /* per-sensor extremes over every sample taken           */
     xadc_sample_t sensor_max;
 } producer_stats_t;
 

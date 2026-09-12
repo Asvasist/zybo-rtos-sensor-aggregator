@@ -5,10 +5,13 @@
 
 #include <stddef.h>
 
+#include "queue.h"
+
 #include "app_config.h"
 #include "console.h"
 #include "gpio_drv.h"
-#include "sensor_mailbox.h"
+#include "sensor_log.h"
+#include "sensor_record.h"
 #include "task_producer.h"
 #include "task_ui.h"
 #include "uart_drv.h"
@@ -19,16 +22,21 @@
 
 typedef struct
 {
-    bool            stream_enabled;
-    bool            stream_slow;        /* print every APP_SLOW_STREAM_DIVIDER-th sample only */
-    bool            stall_reported;     /* one warning per stall, not one per timeout          */
-    uint32_t        received;           /* samples fetched from the mailbox                    */
-    uint32_t        missed;             /* samples overwritten before we got to them           */
-    TickType_t      last_sample_tick;
-    sensor_record_t latest;             /* latest.seq == 0 until the first sample arrives      */
+    bool       stream_enabled;
+    bool       stream_slow;             /* print every APP_SLOW_STREAM_DIVIDER-th sample only   */
+    bool       drain_paused;            /* 'p': leave the log alone and let it fill              */
+    bool       stall_reported;          /* one warning per stall, not one per pass               */
+    uint32_t   received;                /* records taken out of the log                          */
+    uint32_t   last_seq;                /* seq of the last record received, 0 before the first   */
+    uint32_t   lost;                    /* sequence numbers that never arrived                   */
+    uint32_t   log_lock_timeouts;       /* reads that gave up waiting for the mutex              */
+    uint32_t   queue_depth_peak;        /* most messages seen waiting at once                    */
+    uint32_t   last_producer_samples;   /* for stall detection                                   */
+    TickType_t last_progress_tick;
 } consumer_state_t;
 
 static TaskHandle_t     s_consumer_handle;
+static QueueHandle_t    s_consumer_queue;
 
 /* Private to the consumer task, no locking needed. */
 static consumer_state_t s_state;
@@ -56,12 +64,13 @@ static unsigned int consumer_btn_level(const sensor_record_t *record, gpio_btn_i
 static void consumer_print_help(void)
 {
     console_write("\nCommands:\n"
-                  "  r / BTN4   full sensor report (latest sample + min/max)\n"
+                  "  r / BTN4   full sensor report (newest sample + min/max)\n"
                   "  s / BTN5   start/stop telemetry stream\n");
     console_printf("  f          stream rate: every sample (%u Hz) / every %uth (%u Hz)\n",
                    APP_SAMPLE_RATE_HZ, APP_SLOW_STREAM_DIVIDER, APP_SAMPLE_RATE_HZ / APP_SLOW_STREAM_DIVIDER);
-    console_write("  t          print the latest sample once\n"
-                  "  d          diagnostics (timing, missed samples, stacks, heap)\n"
+    console_write("  p          pause/resume reading the log (samples keep accumulating)\n"
+                  "  t          print the newest sample once\n"
+                  "  d          diagnostics (timing, log, mutex, queue, stacks, heap)\n"
                   "  h / ?      this help\n\n");
 }
 
@@ -81,32 +90,42 @@ static void consumer_print_sample_line(const sensor_record_t *record)
                    consumer_btn_level(record, GPIO_BTN5));
 }
 
+/*
+ * The report and 't' show the newest sample in the log rather than the last
+ * one this task received, so they stay current while draining is paused.
+ */
+static bool consumer_get_newest(sensor_record_t *record_out)
+{
+    if (!sensor_log_peek_newest(record_out, pdMS_TO_TICKS(APP_LOG_READ_WAIT_MS)))
+    {
+        console_write("no samples yet (or log busy)\n");
+        return false;
+    }
+
+    return true;
+}
+
 static void consumer_print_report(void)
 {
-    const sensor_record_t *const record = &s_state.latest;
-    producer_stats_t             prod_stats;
-    uint32_t                     sensor;
-    char                         now_str[CONSUMER_NUM_BUF_LEN];
-    char                         min_str[CONSUMER_NUM_BUF_LEN];
-    char                         max_str[CONSUMER_NUM_BUF_LEN];
+    sensor_record_t  record;
+    producer_stats_t prod_stats;
+    uint32_t         sensor;
+    char             now_str[CONSUMER_NUM_BUF_LEN];
+    char             min_str[CONSUMER_NUM_BUF_LEN];
+    char             max_str[CONSUMER_NUM_BUF_LEN];
 
-    if (record->seq == 0U)
+    if (!consumer_get_newest(&record))
     {
-        console_write("no samples yet\n");
         return;
     }
 
-    /*
-     * Min/max come from the producer, which sees every sample, not from what
-     * the consumer happened to receive. They may already include a sample or
-     * two newer than the one shown as "now".
-     */
+    /* Min/max come from the producer, which sees every sample, lost or not. */
     task_producer_get_stats(&prod_stats);
 
     console_write("\n");
-    consumer_print_time_prefix(record->capture_us);
+    consumer_print_time_prefix(record.capture_us);
     console_printf("XADC report, sample #%lu (min/max over %lu samples)\n",
-                   (unsigned long)record->seq, (unsigned long)prod_stats.samples);
+                   (unsigned long)record.seq, (unsigned long)prod_stats.samples);
     console_printf("  %-9s %10s %10s %10s   %s\n", "sensor", "now", "min", "max", "raw");
 
     for (sensor = 0U; sensor < (uint32_t)XADC_SENSOR_COUNT; sensor++)
@@ -115,22 +134,36 @@ static void consumer_print_report(void)
 
         console_printf("  %-9s %8s %s %8s %s %8s %s   0x%03X\n",
                        xadc_drv_sensor_name(id),
-                       consumer_fmt_sensor(now_str, id, record->sensors.raw_code[sensor]),   xadc_drv_sensor_unit(id),
+                       consumer_fmt_sensor(now_str, id, record.sensors.raw_code[sensor]),        xadc_drv_sensor_unit(id),
                        consumer_fmt_sensor(min_str, id, prod_stats.sensor_min.raw_code[sensor]), xadc_drv_sensor_unit(id),
                        consumer_fmt_sensor(max_str, id, prod_stats.sensor_max.raw_code[sensor]), xadc_drv_sensor_unit(id),
-                       (unsigned int)record->sensors.raw_code[sensor]);
+                       (unsigned int)record.sensors.raw_code[sensor]);
     }
     console_write("\n");
+}
+
+static void consumer_print_newest(void)
+{
+    sensor_record_t record;
+
+    if (consumer_get_newest(&record))
+    {
+        consumer_print_sample_line(&record);
+    }
 }
 
 static void consumer_print_stats(void)
 {
     producer_stats_t        prod_stats;
+    sensor_log_stats_t      log_stats;
     uart_drv_err_counters_t uart_errs;
+    uintptr_t               log_base;
+    uint32_t                log_bytes;
     const uint32_t          now_ms = uptime_ms();
 
     task_producer_get_stats(&prod_stats);
     uart_drv_get_err_counters(&uart_errs);
+    sensor_log_storage_info(&log_base, &log_bytes, NULL);
 
     console_write("\nDiagnostics\n");
     console_printf("  uptime          : %lu.%03lu s\n", (unsigned long)(now_ms / 1000U), (unsigned long)(now_ms % 1000U));
@@ -151,11 +184,32 @@ static void consumer_print_stats(void)
     }
 
     console_printf("  XADC read time  : max %lu us\n", (unsigned long)prod_stats.read_time_max_us);
-    console_printf("  consumer        : %lu received, %lu missed, stream %s, %s\n",
+    console_printf("  log write       : max %lu us incl. mutex wait, %lu dropped on lock timeout\n",
+                   (unsigned long)prod_stats.log_write_max_us, (unsigned long)prod_stats.log_write_drops);
+
+    if (sensor_log_get_stats(&log_stats, pdMS_TO_TICKS(APP_LOG_READ_WAIT_MS)))
+    {
+        console_printf("  sensor log      : %lu / %lu records waiting, peak %lu, %lu overwritten\n",
+                       (unsigned long)log_stats.fill, (unsigned long)log_stats.capacity,
+                       (unsigned long)log_stats.fill_high_water, (unsigned long)log_stats.overwritten);
+        console_printf("  log mutex       : held max %lu us, %lu consumer lock timeouts\n",
+                       (unsigned long)log_stats.lock_hold_max_us, (unsigned long)s_state.log_lock_timeouts);
+    }
+    else
+    {
+        console_write("  sensor log      : mutex busy, try again\n");
+    }
+
+    console_printf("  log storage     : %lu bytes at 0x%08lX (DDR)\n", (unsigned long)log_bytes, (unsigned long)log_base);
+    console_printf("  consumer        : %lu received, %lu lost, stream %s, %s, draining %s\n",
                    (unsigned long)s_state.received,
-                   (unsigned long)s_state.missed,
+                   (unsigned long)s_state.lost,
                    s_state.stream_enabled ? "on" : "off",
-                   s_state.stream_slow ? "slow" : "every sample");
+                   s_state.stream_slow ? "slow" : "every sample",
+                   s_state.drain_paused ? "PAUSED" : "on");
+    console_printf("  message queue   : peak %lu / %u, %lu UI messages dropped, %lu doorbell retries\n",
+                   (unsigned long)s_state.queue_depth_peak, APP_CONSUMER_QUEUE_LEN,
+                   (unsigned long)task_ui_dropped_msgs(), (unsigned long)prod_stats.doorbell_retries);
     console_printf("  UART rx errors  : overrun %lu, framing %lu, parity %lu\n",
                    (unsigned long)uart_errs.rx_overrun,
                    (unsigned long)uart_errs.rx_framing,
@@ -172,62 +226,163 @@ static void consumer_print_stats(void)
     console_printf("  heap free       : %lu bytes\n\n", (unsigned long)xPortGetFreeHeapSize());
 }
 
-static void consumer_handle_sample(void)
+static void consumer_process_record(const sensor_record_t *record)
 {
-    sensor_record_t record;
-    bool            print_this_one;
+    bool print_this_one;
 
-    /* Can come up empty: a sample fetched on the previous pass may have set the bit again. */
-    if (!sensor_mailbox_fetch_newer(s_state.latest.seq, &record))
-    {
-        return;
-    }
-
-    s_state.latest = record;
     s_state.received++;
-    s_state.last_sample_tick = xTaskGetTickCount();
-    s_state.stall_reported   = false;
+    s_state.last_seq = record->seq;
 
-    /* seq counts everything produced, received everything we saw - the difference was overwritten. */
-    s_state.missed = record.seq - s_state.received;
+    /*
+     * seq counts every sample the producer took. Whatever never arrived here
+     * was overwritten in a full log or dropped by the producer on a lock
+     * timeout, so once the backlog is drained: lost == overwritten + drops.
+     */
+    s_state.lost = record->seq - s_state.received;
 
-    /* LD4 keeps blinking only while timer, ISR, producer and consumer are all alive. */
+    /* LD4 blinks at 1 Hz while samples flow, holds while paused, flickers while a backlog is drained. */
     if ((s_state.received % APP_HEARTBEAT_SAMPLES) == 0U)
     {
         gpio_drv_led_toggle();
     }
 
     print_this_one = s_state.stream_enabled &&
-                     ((!s_state.stream_slow) || ((record.seq % APP_SLOW_STREAM_DIVIDER) == 0U));
+                     ((!s_state.stream_slow) || ((record->seq % APP_SLOW_STREAM_DIVIDER) == 0U));
     if (print_this_one)
     {
-        consumer_print_sample_line(&record);
+        consumer_print_sample_line(record);
     }
 }
 
-static void consumer_check_stall(TickType_t stall_ticks)
+/*
+ * Pulls records out of the log in batches and processes them with the mutex
+ * released - printing never happens while the lock is held. Stops after
+ * APP_LOG_DRAIN_BATCHES_MAX batches so a large backlog can't keep the
+ * consumer away from its queue, and returns true to ask for another pass
+ * straight away.
+ */
+static bool consumer_drain_log(void)
 {
-    /*
-     * Samples arrive every 100 ms whether the stream is on or not, so a
-     * whole second without one means the timer or the producer has stopped.
-     * Checked on every wake-up, not only on timeout, so a stream of UI events
-     * can't hide it.
-     */
-    if (s_state.stall_reported || ((xTaskGetTickCount() - s_state.last_sample_tick) < stall_ticks))
+    const TickType_t lock_wait = pdMS_TO_TICKS(APP_LOG_READ_WAIT_MS);
+    sensor_record_t  batch[APP_LOG_READ_BATCH];
+    uint32_t         batch_count;
+    uint32_t         batch_num;
+    uint32_t         idx;
+
+    if (s_state.drain_paused)
     {
+        return false;
+    }
+
+    for (batch_num = 0U; batch_num < APP_LOG_DRAIN_BATCHES_MAX; batch_num++)
+    {
+        if (!sensor_log_read(batch, APP_LOG_READ_BATCH, lock_wait, &batch_count))
+        {
+            s_state.log_lock_timeouts++;
+            return true;
+        }
+
+        for (idx = 0U; idx < batch_count; idx++)
+        {
+            consumer_process_record(&batch[idx]);
+        }
+
+        if (batch_count < APP_LOG_READ_BATCH)
+        {
+            /* The log was emptied, so the producer's next write rings the doorbell again. */
+            return false;
+        }
+    }
+
+    return true;
+}
+
+static void consumer_handle_msg(const consumer_msg_t *msg)
+{
+    switch (msg->id)
+    {
+    case CONSUMER_MSG_DATA_READY:
+        /* Nothing to do here: the log is drained after every wake-up, whatever caused it. */
+        break;
+
+    case CONSUMER_MSG_REPORT:
+        consumer_print_report();
+        break;
+
+    case CONSUMER_MSG_STREAM_TOGGLE:
+        s_state.stream_enabled = !s_state.stream_enabled;
+        console_printf("telemetry stream %s\n", s_state.stream_enabled ? "ON" : "OFF");
+        break;
+
+    case CONSUMER_MSG_RATE_TOGGLE:
+        s_state.stream_slow = !s_state.stream_slow;
+        console_printf("stream rate: %s\n", s_state.stream_slow ? "slow" : "every sample");
+        break;
+
+    case CONSUMER_MSG_PAUSE_TOGGLE:
+        s_state.drain_paused = !s_state.drain_paused;
+        console_printf("log reading %s\n",
+                       s_state.drain_paused ? "PAUSED - samples accumulate in the log" : "RESUMED");
+        break;
+
+    case CONSUMER_MSG_PRINT_NEWEST:
+        consumer_print_newest();
+        break;
+
+    case CONSUMER_MSG_STATS:
+        consumer_print_stats();
+        break;
+
+    case CONSUMER_MSG_HELP:
+        consumer_print_help();
+        break;
+
+    case CONSUMER_MSG_UNKNOWN_KEY:
+        console_printf("unknown command '%c', 'h' for help\n", msg->key);
+        break;
+
+    default:
+        console_printf("WARN: unexpected message id %d\n", (int)msg->id);
+        break;
+    }
+}
+
+static void consumer_check_stall(void)
+{
+    const TickType_t stall_ticks = pdMS_TO_TICKS(APP_STALL_WARN_MS);
+    const TickType_t now_tick    = xTaskGetTickCount();
+    producer_stats_t prod_stats;
+
+    /*
+     * Watches the producer's sample count, not what arrives here: with
+     * draining paused nothing arrives, and that isn't a stall.
+     */
+    task_producer_get_stats(&prod_stats);
+
+    if (prod_stats.samples != s_state.last_producer_samples)
+    {
+        s_state.last_producer_samples = prod_stats.samples;
+        s_state.last_progress_tick    = now_tick;
+        s_state.stall_reported        = false;
         return;
     }
 
-    consumer_print_time_prefix(uptime_us());
-    console_printf("WARN: no sample for %u ms (last #%lu)\n", APP_STALL_WARN_MS, (unsigned long)s_state.latest.seq);
-    s_state.stall_reported = true;
+    if ((!s_state.stall_reported) && ((now_tick - s_state.last_progress_tick) >= stall_ticks))
+    {
+        consumer_print_time_prefix(uptime_us());
+        console_printf("WARN: producer has taken no sample for %u ms (last #%lu)\n",
+                       APP_STALL_WARN_MS, (unsigned long)prod_stats.samples);
+        s_state.stall_reported = true;
+    }
 }
 
 static void consumer_task(void *task_arg)
 {
-    const TickType_t stall_ticks = pdMS_TO_TICKS(APP_STALL_WARN_MS);
+    const TickType_t poll_ticks = pdMS_TO_TICKS(APP_CONSUMER_POLL_MS);
     producer_stats_t prod_stats;
-    uint32_t         events;
+    consumer_msg_t   msg;
+    UBaseType_t      queue_depth;
+    bool             backlog_pending = false;
 
     (void)task_arg;
 
@@ -239,58 +394,30 @@ static void consumer_task(void *task_arg)
     console_printf("scheduler running, sample period %lu us\n", (unsigned long)prod_stats.timer_period_us);
     consumer_print_help();
 
-    s_state.last_sample_tick = xTaskGetTickCount();
+    s_state.last_progress_tick = xTaskGetTickCount();
 
     for (;;)
     {
-        /* Bits set while we're busy stay pending and are picked up on the next pass. */
-        events = 0U;
-        if (xTaskNotifyWait(0U, CONSUMER_EVT_ALL, &events, stall_ticks) != pdTRUE)
+        /*
+         * Normally block on the queue. The timeout is a safety net: even if a
+         * doorbell were ever lost, the log still gets drained within
+         * APP_CONSUMER_POLL_MS. With a backlog, only glance at the queue and
+         * go straight back to draining.
+         */
+        if (xQueueReceive(s_consumer_queue, &msg, backlog_pending ? 0U : poll_ticks) == pdTRUE)
         {
-            events = 0U;
-        }
-
-        if ((events & CONSUMER_EVT_SAMPLE) != 0U)
-        {
-            consumer_handle_sample();
-        }
-
-        if ((events & CONSUMER_EVT_STREAM_TOGGLE) != 0U)
-        {
-            s_state.stream_enabled = !s_state.stream_enabled;
-            console_printf("telemetry stream %s\n", s_state.stream_enabled ? "ON" : "OFF");
-        }
-
-        if ((events & CONSUMER_EVT_RATE_TOGGLE) != 0U)
-        {
-            s_state.stream_slow = !s_state.stream_slow;
-            console_printf("stream rate: %s\n", s_state.stream_slow ? "slow" : "every sample");
-        }
-
-        if ((events & CONSUMER_EVT_PRINT_ONE) != 0U)
-        {
-            if (s_state.latest.seq != 0U)
+            /* +1 for the message just taken off */
+            queue_depth = uxQueueMessagesWaiting(s_consumer_queue) + 1U;
+            if (queue_depth > s_state.queue_depth_peak)
             {
-                consumer_print_sample_line(&s_state.latest);
+                s_state.queue_depth_peak = (uint32_t)queue_depth;
             }
+
+            consumer_handle_msg(&msg);
         }
 
-        if ((events & CONSUMER_EVT_REPORT) != 0U)
-        {
-            consumer_print_report();
-        }
-
-        if ((events & CONSUMER_EVT_STATS) != 0U)
-        {
-            consumer_print_stats();
-        }
-
-        if ((events & CONSUMER_EVT_HELP) != 0U)
-        {
-            consumer_print_help();
-        }
-
-        consumer_check_stall(stall_ticks);
+        backlog_pending = consumer_drain_log();
+        consumer_check_stall();
     }
 }
 
@@ -298,17 +425,33 @@ bool task_consumer_create(void)
 {
     s_state.stream_enabled = true;
     s_state.stream_slow    = false;
+    s_state.drain_paused   = false;
+
+    s_consumer_queue = xQueueCreate(APP_CONSUMER_QUEUE_LEN, sizeof(consumer_msg_t));
+    if (s_consumer_queue == NULL)
+    {
+        return false;
+    }
+
+#if defined(configQUEUE_REGISTRY_SIZE) && (configQUEUE_REGISTRY_SIZE > 0)
+    vQueueAddToRegistry(s_consumer_queue, "consumer_q");
+#endif
 
     return xTaskCreate(consumer_task, "consumer", APP_STACK_CONSUMER, NULL,
                        APP_PRIO_CONSUMER, &s_consumer_handle) == pdPASS;
 }
 
-void task_consumer_post_event(uint32_t event_bits)
+bool task_consumer_send(consumer_msg_id_t id, char key)
 {
-    if (s_consumer_handle != NULL)
+    const consumer_msg_t msg = { id, key };
+
+    if (s_consumer_queue == NULL)
     {
-        (void)xTaskNotify(s_consumer_handle, event_bits, eSetBits);
+        return false;
     }
+
+    /* Zero wait: neither the producer nor the UI task may ever block on the consumer. */
+    return xQueueSend(s_consumer_queue, &msg, 0U) == pdTRUE;
 }
 
 TaskHandle_t task_consumer_handle(void)

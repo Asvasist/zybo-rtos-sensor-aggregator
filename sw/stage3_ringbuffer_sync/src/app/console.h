@@ -5,10 +5,11 @@
  * translation, plus a fixed-point formatter so the firmware never needs
  * float support in printf.
  *
- * Not reentrant - one shared format buffer. In stage 2 that's handled by
- * ownership: main() prints before the scheduler starts, after that only the
- * consumer task does. The fault handler uses console_write() only, never the
- * formatted functions, so it can't collide with a half-built line.
+ * Not reentrant - one shared format buffer. Rather than a mutex, the console
+ * has a gatekeeper: main() prints before the scheduler starts, after that
+ * only the consumer task does, and every other task sends it a message
+ * instead. The fault handler uses console_write() only, never the formatted
+ * functions, so it can't collide with a half-built line.
  */
 #ifndef CONSOLE_H
 #define CONSOLE_H

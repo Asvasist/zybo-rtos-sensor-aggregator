@@ -1,20 +1,19 @@
 /*
  * task_consumer.h
  *
- * Consumer: the lowest priority application task, and the only task that
- * writes to the console once the scheduler is running.
+ * Consumer: the lowest priority application task, and the console
+ * gatekeeper - the only task that writes to the UART once the scheduler is
+ * running. Anything that wants something printed sends it a message.
  *
- * It sleeps on its task notification value, used as a set of event bits. The
- * producer sets CONSUMER_EVT_SAMPLE after every sample, the UI task sets the
- * others for button presses and terminal keys. One wait covers every source,
- * and whatever has piled up is handled in one pass.
+ * Inputs:
+ *   - its message queue: commands from the UI task, and the producer's
+ *     DATA_READY doorbell
+ *   - the sensor log, drained in batches after every wake-up
  *
- * Bits don't count. If the same event is posted twice before the consumer
- * gets to run, it's handled once. For "new sample" that's exactly what's
- * wanted - the mailbox only holds the newest one anyway, and the sequence
- * number shows what was skipped. For UI requests it means a very fast double
- * press can collapse into one, which is acceptable for now; stage 3 moves
- * commands onto a queue.
+ * Data and control travel separately on purpose. Samples live in the log,
+ * where a slow consumer only makes the backlog grow. The queue carries short
+ * control messages which, unlike stage 2's notification bits, don't merge
+ * when sent twice and can carry a payload (the key that was pressed).
  */
 #ifndef TASK_CONSUMER_H
 #define TASK_CONSUMER_H
@@ -25,22 +24,33 @@
 #include "FreeRTOS.h"
 #include "task.h"
 
-#define CONSUMER_EVT_SAMPLE         (1UL << 0)  /* new sample in the mailbox           */
-#define CONSUMER_EVT_REPORT         (1UL << 1)  /* full sensor report                  */
-#define CONSUMER_EVT_STREAM_TOGGLE  (1UL << 2)  /* stream on/off                       */
-#define CONSUMER_EVT_RATE_TOGGLE    (1UL << 3)  /* every sample / every Nth sample     */
-#define CONSUMER_EVT_PRINT_ONE      (1UL << 4)  /* latest sample once, stream or not   */
-#define CONSUMER_EVT_STATS          (1UL << 5)  /* diagnostics                         */
-#define CONSUMER_EVT_HELP           (1UL << 6)
+typedef enum
+{
+    CONSUMER_MSG_DATA_READY = 0,    /* producer: the log went from empty to non-empty */
+    CONSUMER_MSG_REPORT,            /* full sensor report                             */
+    CONSUMER_MSG_STREAM_TOGGLE,     /* stream on/off                                  */
+    CONSUMER_MSG_RATE_TOGGLE,       /* every sample / every Nth sample                */
+    CONSUMER_MSG_PAUSE_TOGGLE,      /* stop/resume draining the log                   */
+    CONSUMER_MSG_PRINT_NEWEST,      /* newest sample once, stream or not              */
+    CONSUMER_MSG_STATS,             /* diagnostics                                    */
+    CONSUMER_MSG_HELP,
+    CONSUMER_MSG_UNKNOWN_KEY        /* key carries the character                      */
+} consumer_msg_id_t;
 
-#define CONSUMER_EVT_ALL            (CONSUMER_EVT_SAMPLE | CONSUMER_EVT_REPORT | CONSUMER_EVT_STREAM_TOGGLE | \
-                                     CONSUMER_EVT_RATE_TOGGLE | CONSUMER_EVT_PRINT_ONE | CONSUMER_EVT_STATS | \
-                                     CONSUMER_EVT_HELP)
+typedef struct
+{
+    consumer_msg_id_t id;
+    char              key;          /* terminal key behind the message, '\0' for buttons and the producer */
+} consumer_msg_t;
 
+/* Creates the queue and the task. Call from main() before the scheduler starts. */
 bool task_consumer_create(void);
 
-/* Sets event bits for the consumer. Task context only - there is no ISR variant on purpose. */
-void task_consumer_post_event(uint32_t event_bits);
+/*
+ * Queues a message for the consumer. Never blocks - returns false if the
+ * queue is full, and the caller decides what that means. Task context only.
+ */
+bool task_consumer_send(consumer_msg_id_t id, char key);
 
 TaskHandle_t task_consumer_handle(void);
 

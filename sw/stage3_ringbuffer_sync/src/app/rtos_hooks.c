@@ -36,6 +36,9 @@ void vApplicationStackOverflowHook(TaskHandle_t task_handle, char *task_name)
 
 void vApplicationMallocFailedHook(void)
 {
-    /* Only task creation allocates in this design, so this can only trip during startup. */
+    /*
+     * Only startup allocates in this design (tasks, the consumer queue, the
+     * log mutex), so this can only trip before the scheduler is running.
+     */
     fault_halt_str("heap exhausted", "pvPortMalloc() returned NULL");
 }

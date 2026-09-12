@@ -4,7 +4,6 @@
 #include "task_ui.h"
 
 #include <stddef.h>
-#include <stdint.h>
 
 #include "app_config.h"
 #include "gpio_drv.h"
@@ -13,33 +12,60 @@
 
 static TaskHandle_t s_ui_handle;
 
+/* Written by the UI task only; a plain 32-bit read from another task is atomic on this core. */
+static uint32_t     s_dropped_msgs;
+
+static void ui_send(consumer_msg_id_t id, char key)
+{
+    if (!task_consumer_send(id, key))
+    {
+        /*
+         * Queue full: the consumer is stuck or far behind. Dropping the key
+         * press is the right call - waiting here would stall the button scan
+         * and the RX FIFO drain along with it.
+         */
+        s_dropped_msgs++;
+    }
+}
+
 static void ui_handle_key(char key)
 {
     switch (key)
     {
     case 'r':
     case 'R':
-        task_consumer_post_event(CONSUMER_EVT_REPORT);
+        ui_send(CONSUMER_MSG_REPORT, key);
         break;
 
     case 's':
     case 'S':
-        task_consumer_post_event(CONSUMER_EVT_STREAM_TOGGLE);
+        ui_send(CONSUMER_MSG_STREAM_TOGGLE, key);
         break;
 
     case 'f':
     case 'F':
-        task_consumer_post_event(CONSUMER_EVT_RATE_TOGGLE);
+        ui_send(CONSUMER_MSG_RATE_TOGGLE, key);
+        break;
+
+    case 'p':
+    case 'P':
+        ui_send(CONSUMER_MSG_PAUSE_TOGGLE, key);
         break;
 
     case 't':
     case 'T':
-        task_consumer_post_event(CONSUMER_EVT_PRINT_ONE);
+        ui_send(CONSUMER_MSG_PRINT_NEWEST, key);
         break;
 
     case 'd':
     case 'D':
-        task_consumer_post_event(CONSUMER_EVT_STATS);
+        ui_send(CONSUMER_MSG_STATS, key);
+        break;
+
+    case 'h':
+    case 'H':
+    case '?':
+        ui_send(CONSUMER_MSG_HELP, key);
         break;
 
     case '\r':
@@ -49,10 +75,10 @@ static void ui_handle_key(char key)
         break;
 
     default:
-        /* 'h', '?' and anything else printable get the help text. */
         if ((key >= ' ') && (key <= '~'))
         {
-            task_consumer_post_event(CONSUMER_EVT_HELP);
+            /* The queue can carry the character, so the consumer can say which key it didn't know. */
+            ui_send(CONSUMER_MSG_UNKNOWN_KEY, key);
         }
         break;
     }
@@ -77,18 +103,19 @@ static void ui_task(void *task_arg)
 
         if (gpio_drv_btn_take_press(GPIO_BTN4))
         {
-            task_consumer_post_event(CONSUMER_EVT_REPORT);
+            ui_send(CONSUMER_MSG_REPORT, '\0');
         }
 
         if (gpio_drv_btn_take_press(GPIO_BTN5))
         {
-            task_consumer_post_event(CONSUMER_EVT_STREAM_TOGGLE);
+            ui_send(CONSUMER_MSG_STREAM_TOGGLE, '\0');
         }
 
         /*
          * The RX FIFO holds 64 bytes and gets drained every 10 ms, which is far
          * more than anyone types. Pasting a large block into the terminal can
-         * still overrun it; that shows up in the 'd' error counters.
+         * still overrun it (UART error counters) or fill the consumer queue
+         * (dropped messages) - both show up in 'd'.
          */
         while (uart_drv_try_get_char(&rx_char))
         {
@@ -105,4 +132,9 @@ bool task_ui_create(void)
 TaskHandle_t task_ui_handle(void)
 {
     return s_ui_handle;
+}
+
+uint32_t task_ui_dropped_msgs(void)
+{
+    return s_dropped_msgs;
 }
