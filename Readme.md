@@ -21,7 +21,7 @@ Firmware first, entirely on the PS. The PL design comes last, once the software 
 |-------|-------|--------|--------|
 | 1 | Bare-metal drivers: UART, MIO GPIO, XADC; temperature on the terminal | `sw/stage1_baremetal_drivers` | Code complete, board bring-up pending |
 | 2 | FreeRTOS: timer-paced producer (100 ms XADC), consumer printing over UART | `sw/stage2_freertos_tasks` | Code complete, board bring-up pending |
-| 3 | Ring buffer in DDR, mutex protection, queue between tasks | - | Planned |
+| 3 | Ring buffer in DDR, mutex protection, queue between tasks | `sw/stage3_ringbuffer_sync` | Code complete, ring buffer host-tested, board bring-up pending |
 | 4 | Zynq hardware watchdog + dedicated kick task, hang detection | - | Planned |
 | 5 | PL design: AXI GPIO for SW0-3 / BTN0-3, full hardware platform | `hw/` | Planned |
 
@@ -40,6 +40,10 @@ sw/
   stage2_freertos_tasks/
     Readme.md
     src/                         FreeRTOS application sources
+  stage3_ringbuffer_sync/
+    Readme.md
+    src/                         FreeRTOS application sources
+    tests/host/                  unit tests that run on a PC
 ```
 
 Each stage is a complete, self-contained application source tree, so any

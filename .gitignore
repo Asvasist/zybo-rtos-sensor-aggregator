@@ -23,6 +23,11 @@ build/
 *.d
 *.map
 
+# ---- host unit test binaries ----
+sw/*/tests/host/test_*
+!sw/*/tests/host/test_*.c
+*.exe
+
 # ---- editors / OS ----
 .vscode/
 *.swp
