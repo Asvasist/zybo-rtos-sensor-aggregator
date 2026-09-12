@@ -46,7 +46,13 @@ apply_bd_automation -rule xilinx.com:bd_rule:processing_system7 \
 
 # Nothing in the PL to talk to yet. Dropping GP0 avoids the validation error
 # about an undriven M_AXI_GP0_ACLK.
-set_property CONFIG.PCW_USE_M_AXI_GP0 {0} $ps7
+#
+# TTC0 is the sample timer from stage 2 on. Set explicitly rather than relying
+# on the board preset having it on; its outputs stay on EMIO, unconnected.
+set_property -dict [list \
+    CONFIG.PCW_USE_M_AXI_GP0          {0} \
+    CONFIG.PCW_TTC0_PERIPHERAL_ENABLE {1} \
+] $ps7
 
 validate_bd_design
 save_bd_design

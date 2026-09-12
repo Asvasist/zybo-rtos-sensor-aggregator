@@ -28,16 +28,23 @@ Output:
 | `hw/build/zybo_ps_platform/` | throwaway Vivado project (git-ignored) |
 | `hw/export/zybo_ps_platform.xsa` | hardware handoff for Vitis (git-ignored, regenerate it) |
 
-## What the preset gives the firmware
+## What the platform gives the firmware
 
-| Resource | Where | Used by |
-|----------|-------|---------|
-| UART1 | MIO48 TX / MIO49 RX, USB-UART on the PROG/UART port | console |
-| GPIO | MIO7 (LD4), MIO50 (BTN4), MIO51 (BTN5) | heartbeat LED, buttons |
-| XADC | PS-XADC interface (DevC), no PL wiring needed | temperature, supply rails |
-| DDR3 | 512 MB (original Zybo), 1 GB (Zybo Z7) | code, data, ring buffer later |
+| Resource | Where | Used by | Since |
+|----------|-------|---------|-------|
+| UART1 | MIO48 TX / MIO49 RX, USB-UART on the PROG/UART port | console | stage 1 |
+| GPIO | MIO7 (LD4), MIO50 (BTN4), MIO51 (BTN5) | heartbeat LED, buttons | stage 1 |
+| XADC | PS-XADC interface (DevC), no PL wiring needed | temperature, supply rails | stage 1 |
+| TTC0 | counter 1, IRQ 43, outputs on EMIO (unused) | 100 ms sample timer | stage 2 |
+| DDR3 | 512 MB (original Zybo), 1 GB (Zybo Z7) | code, data, ring buffer later | - |
+
+Everything except TTC0 comes from the board preset. TTC0 is switched on
+explicitly by the script. An XSA exported before stage 2 may not have it -
+the stage 2 build then fails on the missing `XPAR_XTTCPS_1_*` definitions,
+and regenerating the XSA fixes it.
 
 If the project is built by hand in the GUI instead of the script: add a ZYNQ7
 Processing System, run block automation with "Apply Board Preset" ticked,
-untick M_AXI_GP0 under PS-PL configuration, create the HDL wrapper and export
-the hardware (no bitstream).
+untick M_AXI_GP0 under PS-PL configuration, tick TTC0 under MIO configuration
+> Application Processor Unit > Timer 0, create the HDL wrapper and export the
+hardware (no bitstream).
