@@ -38,11 +38,14 @@
 #define BOARD_PS_GPIO_ID            XPAR_XGPIOPS_0_DEVICE_ID
 #define BOARD_XADC_ID               XPAR_XADCPS_0_DEVICE_ID
 #define BOARD_SAMPLE_TTC_ID         XPAR_XTTCPS_2_DEVICE_ID
+#define BOARD_WDT_ID                XPAR_XWDTPS_0_DEVICE_ID
+#define BOARD_WDT_CLK_HZ            XPAR_PS7_WDT_0_WDT_CLK_FREQ_HZ  /* SDT has it in the config table */
 #else
 #define BOARD_CONSOLE_UART_ID       XPAR_XUARTPS_0_BASEADDR
 #define BOARD_PS_GPIO_ID            XPAR_XGPIOPS_0_BASEADDR
 #define BOARD_XADC_ID               0U
 #define BOARD_SAMPLE_TTC_ID         XPAR_XTTCPS_2_BASEADDR
+#define BOARD_WDT_ID                XPAR_XWDTPS_0_BASEADDR
 #endif
 
 /* -------------------------------------------------------------------------

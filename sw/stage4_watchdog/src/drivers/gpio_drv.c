@@ -8,24 +8,10 @@
 #include <stddef.h>
 
 #include "xgpiops.h"
-#include "xil_io.h"
 #include "xstatus.h"
 
 #include "board_zybo.h"
-
-/*
- * SLCR registers for MIO pad configuration (UG585, appendix B). The SLCR is
- * write-protected after ps7_init; it is unlocked only for the pad update and
- * locked again straight after if it was locked before.
- */
-#define SLCR_LOCK_OFFSET            0x004U
-#define SLCR_UNLOCK_OFFSET          0x008U
-#define SLCR_LOCKSTA_OFFSET         0x00CU
-#define SLCR_MIO_PIN_00_OFFSET      0x700U      /* MIO_PIN_n at 0x700 + 4 * n */
-#define SLCR_LOCK_KEY               0x767BU
-#define SLCR_UNLOCK_KEY             0xDF0DU
-#define SLCR_LOCKSTA_LOCKED_MASK    0x1U
-#define SLCR_MIO_PIN_PULLUP_MASK    0x1000U     /* bit 12 */
+#include "slcr.h"
 
 typedef struct
 {
@@ -62,30 +48,10 @@ static bool gpio_btn_read_raw(gpio_btn_id_t btn)
     return s_btn_hw[btn].active_high ? (pin_level != 0U) : (pin_level == 0U);
 }
 
-/*
- * Sets or clears the internal pull-up of one MIO pad. Single-threaded use
- * only (called from init, before the scheduler starts) - the SLCR unlock is
- * global.
- */
+/* Internal pull-up of one MIO pad. Init only - see slcr.h. */
 static void gpio_mio_set_pullup(uint32_t mio_pin, bool enable)
 {
-    const UINTPTR pin_reg    = XPS_SYS_CTRL_BASEADDR + SLCR_MIO_PIN_00_OFFSET + (4U * mio_pin);
-    const bool    was_locked = (Xil_In32(XPS_SYS_CTRL_BASEADDR + SLCR_LOCKSTA_OFFSET) & SLCR_LOCKSTA_LOCKED_MASK) != 0U;
-    uint32_t      pin_cfg;
-
-    if (was_locked)
-    {
-        Xil_Out32(XPS_SYS_CTRL_BASEADDR + SLCR_UNLOCK_OFFSET, SLCR_UNLOCK_KEY);
-    }
-
-    pin_cfg = Xil_In32(pin_reg);
-    pin_cfg = enable ? (pin_cfg | SLCR_MIO_PIN_PULLUP_MASK) : (pin_cfg & ~SLCR_MIO_PIN_PULLUP_MASK);
-    Xil_Out32(pin_reg, pin_cfg);
-
-    if (was_locked)
-    {
-        Xil_Out32(XPS_SYS_CTRL_BASEADDR + SLCR_LOCK_OFFSET, SLCR_LOCK_KEY);
-    }
+    slcr_modify(SLCR_MIO_PIN_OFFSET(mio_pin), SLCR_MIO_PIN_PULLUP_MASK, enable ? SLCR_MIO_PIN_PULLUP_MASK : 0U);
 }
 
 gpio_drv_status_t gpio_drv_init(void)
