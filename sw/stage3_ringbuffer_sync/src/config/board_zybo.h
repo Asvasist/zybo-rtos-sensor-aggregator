@@ -60,12 +60,24 @@
  * BTN4 - MIO50, active high, pulled down on the board.
  * BTN5 - MIO51, active high, pulled down on the board.
  *
- * The MIO pin mux itself is configured by ps7_init (board preset), the
- * firmware only sets direction and output enable.
+ * The pin mux comes from ps7_init (board preset); the firmware sets
+ * direction and output enable, and the pad pull-up on the button pins.
+ *
+ * Button pull-ups: the original Zybo preset disables the Zynq's internal
+ * pull-up on MIO50/51 so the board's pull-down resistors set the idle level.
+ * The Zybo Z7 preset leaves them at Vivado's default (enabled) - on the first
+ * Z7-20 run both buttons then read as permanently pressed. gpio_drv_init()
+ * therefore applies BOARD_MIO_BTN_PULLUP itself, whatever the XSA says.
+ *
+ * To be confirmed on the Z7 during stage 4 bring-up (press = 1, release = 0).
+ * If a Z7 revision turns out to wire them active low instead, set
+ * BOARD_MIO_BTN_ACTIVE_HIGH to 0 and BOARD_MIO_BTN_PULLUP to 1.
  * ------------------------------------------------------------------------- */
 #define BOARD_MIO_LED4              7U
 #define BOARD_MIO_BTN4              50U
 #define BOARD_MIO_BTN5              51U
+#define BOARD_MIO_BTN_ACTIVE_HIGH   1
+#define BOARD_MIO_BTN_PULLUP        0
 
 /* -------------------------------------------------------------------------
  * Sample timer

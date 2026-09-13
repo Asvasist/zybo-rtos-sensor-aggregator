@@ -230,6 +230,12 @@ void task_producer_get_stats(producer_stats_t *stats_out)
     taskEXIT_CRITICAL();
 }
 
+uint32_t task_producer_sample_count(void)
+{
+    /* A single 32-bit read is atomic on this core; only the producer writes it. */
+    return s_stats.samples;
+}
+
 TaskHandle_t task_producer_handle(void)
 {
     return s_producer_handle;

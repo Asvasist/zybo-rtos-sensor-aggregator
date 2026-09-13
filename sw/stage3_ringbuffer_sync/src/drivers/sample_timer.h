@@ -42,9 +42,9 @@ void sample_timer_start(void);
 void sample_timer_stop(void);
 
 /*
- * Period the counter actually runs at, in microseconds. Differs slightly from
- * 1/rate_hz because the divider is integer; e.g. 100 ms requested gives
- * 99998 us with the Zybo's TTC clock.
+ * Period the counter actually runs at, in microseconds, computed back from
+ * the divider the driver picked. Can differ slightly from 1/rate_hz because
+ * the divider is integer; on the Zybo Z7 at 10 Hz it comes out at 100000 us.
  */
 uint32_t sample_timer_period_us(void);
 

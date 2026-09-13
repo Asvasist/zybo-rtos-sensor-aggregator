@@ -105,8 +105,9 @@ sample_timer_status_t sample_timer_init(uint32_t rate_hz, sample_timer_cb_t tick
     }
 
     /*
-     * The counter is only 16 bits, so 10 Hz needs the prescaler. With the
-     * ~111 MHz TTC clock this ends up at prescaler 2^8, interval 43401.
+     * The counter is only 16 bits, so 10 Hz needs the prescaler: with the
+     * Zybo Z7's 111.1 MHz TTC clock the driver settles on divide-by-256 and
+     * a count of about 43400 per period.
      */
     XTtcPs_CalcIntervalFromFreq(&s_ttc_inst, rate_hz, &interval, &prescaler);
     if (prescaler == TTC_PRESCALER_INVALID)

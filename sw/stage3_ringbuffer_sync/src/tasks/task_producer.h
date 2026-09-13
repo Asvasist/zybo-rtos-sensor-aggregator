@@ -45,6 +45,12 @@ bool task_producer_create(void);
 /* Consistent snapshot of the producer's counters; callable from any task. */
 void task_producer_get_stats(producer_stats_t *stats_out);
 
+/*
+ * Just the sample count, without the ~70 byte critical-section copy of the
+ * full statistics. For callers that poll it often (stall detection).
+ */
+uint32_t task_producer_sample_count(void);
+
 TaskHandle_t task_producer_handle(void);
 
 #endif /* TASK_PRODUCER_H */

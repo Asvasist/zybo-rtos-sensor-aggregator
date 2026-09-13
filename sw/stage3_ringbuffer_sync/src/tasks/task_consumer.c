@@ -349,19 +349,19 @@ static void consumer_handle_msg(const consumer_msg_t *msg)
 
 static void consumer_check_stall(void)
 {
-    const TickType_t stall_ticks = pdMS_TO_TICKS(APP_STALL_WARN_MS);
-    const TickType_t now_tick    = xTaskGetTickCount();
-    producer_stats_t prod_stats;
+    const TickType_t stall_ticks      = pdMS_TO_TICKS(APP_STALL_WARN_MS);
+    const TickType_t now_tick         = xTaskGetTickCount();
+    const uint32_t   producer_samples = task_producer_sample_count();
 
     /*
      * Watches the producer's sample count, not what arrives here: with
-     * draining paused nothing arrives, and that isn't a stall.
+     * draining paused nothing arrives, and that isn't a stall. Runs on every
+     * pass of the consumer loop, hence the cheap counter read instead of a
+     * full statistics snapshot.
      */
-    task_producer_get_stats(&prod_stats);
-
-    if (prod_stats.samples != s_state.last_producer_samples)
+    if (producer_samples != s_state.last_producer_samples)
     {
-        s_state.last_producer_samples = prod_stats.samples;
+        s_state.last_producer_samples = producer_samples;
         s_state.last_progress_tick    = now_tick;
         s_state.stall_reported        = false;
         return;
@@ -371,7 +371,7 @@ static void consumer_check_stall(void)
     {
         consumer_print_time_prefix(uptime_us());
         console_printf("WARN: producer has taken no sample for %u ms (last #%lu)\n",
-                       APP_STALL_WARN_MS, (unsigned long)prod_stats.samples);
+                       APP_STALL_WARN_MS, (unsigned long)producer_samples);
         s_state.stall_reported = true;
     }
 }
