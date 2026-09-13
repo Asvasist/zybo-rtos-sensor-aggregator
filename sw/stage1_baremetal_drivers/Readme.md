@@ -90,6 +90,26 @@ not hard real-time - printing a full report blocks for ~70 ms at 115200 baud
 and stretches them. That's accepted for stage 1; stage 2 moves sampling onto a
 hardware timer interrupt.
 
+## Fixes from the first board bring-up (Vitis 2025.2)
+
+Found while bringing up stage 3 on a Zybo Z7-20 with Vivado and Vitis 2025.2
+(SDT flow) and carried back here, since this stage shares the drivers. It
+compiles and links against the 2025.2 driver headers and libraries; a run of
+this stage on the board is still to do.
+
+- `XUartPsFormat` is the driver's real type name.
+- SDT BSPs have no `xtime_l.h`; `XTime_GetTime()` comes from `xiltimer.h`. The
+  xiltimer library only starts the global timer on the first sleep call, so
+  `main()` now does a 1 us sleep before the loop starts using the timer.
+- The Zybo Z7 preset enables the internal pull-ups on the MIO50/51 buttons,
+  which makes them read as permanently pressed. `gpio_drv` now sets the pad
+  pull-up itself from `board_zybo.h`.
+- XADC lookup in the SDT flow by base address 0 ("first instance").
+
+With Vitis 2025.2 (Unified IDE only) use the platform/application steps from
+`sw/stage3_ringbuffer_sync/Readme.md`, but choose **standalone** as the OS and
+copy this stage's sources into the application's `src/` flat.
+
 ## Build and run
 
 ### 1. Hardware platform
