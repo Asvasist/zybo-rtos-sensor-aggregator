@@ -21,6 +21,21 @@
 
 #define USEC_PER_SEC            1000000ULL
 
+/*
+ * Interrupt ID as the FreeRTOS port wants it, which differs between flows:
+ *   classic: plain GIC ID (uint8_t), straight from xparameters_ps.h
+ *   SDT:     encoded ID (uint16_t) - SPI number in bits 11:0 plus trigger
+ *            flags - which the interrupt wrapper turns back into a GIC ID by
+ *            adding 32. Passing the plain GIC ID there would hook up the
+ *            wrong interrupt, so it comes from the config table instead. Each
+ *            TTC counter has its own table entry, hence always index 0.
+ */
+#ifndef SDT
+#define SAMPLE_TIMER_IRQ_ID(cfg)    ((uint8_t)BOARD_SAMPLE_TTC_IRQ)
+#else
+#define SAMPLE_TIMER_IRQ_ID(cfg)    ((uint16_t)(cfg)->IntrId[0])
+#endif
+
 static XTtcPs            s_ttc_inst;
 static sample_timer_cb_t s_tick_cb;
 static void             *s_tick_cb_ctx;
@@ -70,14 +85,13 @@ sample_timer_status_t sample_timer_init(uint32_t rate_hz, sample_timer_cb_t tick
     if (xil_status == XST_DEVICE_IS_STARTED)
     {
         /*
-         * Still counting from a previous run - typical after restarting the
-         * application from the debugger without a system reset. Stop it at
-         * register level (XTtcPs_Stop() asserts on an instance that isn't
-         * marked ready yet) and try again.
+         * Already counting. By the time this runs the scheduler is up, and
+         * the likeliest owner is the RTOS tick (xiltimer tick_timer set to
+         * this counter). Taking it over would silently stop the kernel, so
+         * refuse instead. A leftover from a debug session can't cause this:
+         * a Vitis run resets the system first.
          */
-        XTtcPs_WriteReg(ttc_cfg->BaseAddress, XTTCPS_CNT_CNTRL_OFFSET,
-                        XTtcPs_ReadReg(ttc_cfg->BaseAddress, XTTCPS_CNT_CNTRL_OFFSET) | XTTCPS_CNT_CNTRL_DIS_MASK);
-        xil_status = XTtcPs_CfgInitialize(&s_ttc_inst, ttc_cfg, ttc_cfg->BaseAddress);
+        return SAMPLE_TIMER_ERR_BUSY;
     }
     if (xil_status != XST_SUCCESS)
     {
@@ -120,13 +134,13 @@ sample_timer_status_t sample_timer_init(uint32_t rate_hz, sample_timer_cb_t tick
      * allowed to call FreeRTOS FromISR functions, and the TTC line is level
      * high. The port asserts if the priority ever ends up wrong.
      */
-    if (xPortInstallInterruptHandler((uint8_t)BOARD_SAMPLE_TTC_IRQ, sample_timer_isr, &s_ttc_inst) != pdPASS)
+    if (xPortInstallInterruptHandler(SAMPLE_TIMER_IRQ_ID(ttc_cfg), sample_timer_isr, &s_ttc_inst) != pdPASS)
     {
         return SAMPLE_TIMER_ERR_IRQ;
     }
 
     XTtcPs_EnableInterrupts(&s_ttc_inst, XTTCPS_IXR_INTERVAL_MASK);
-    vPortEnableInterrupt((uint8_t)BOARD_SAMPLE_TTC_IRQ);
+    vPortEnableInterrupt(SAMPLE_TIMER_IRQ_ID(ttc_cfg));
 
     s_timer_ready = true;
     return SAMPLE_TIMER_OK;

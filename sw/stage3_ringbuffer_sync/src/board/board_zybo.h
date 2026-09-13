@@ -28,17 +28,21 @@
  *
  * TTC instances are numbered per counter: TTC0 counters 0/1/2 are instances
  * 0/1/2, TTC1 (if enabled) follows as 3/4/5.
+ *
+ * There is only one XADC. In the SDT flow its lookup is done with base
+ * address 0, which XAdcPs_LookupConfig() treats as "first instance" - the
+ * same thing the Xilinx SDT examples do.
  * ------------------------------------------------------------------------- */
 #ifndef SDT
 #define BOARD_CONSOLE_UART_ID       XPAR_XUARTPS_0_DEVICE_ID
 #define BOARD_PS_GPIO_ID            XPAR_XGPIOPS_0_DEVICE_ID
 #define BOARD_XADC_ID               XPAR_XADCPS_0_DEVICE_ID
-#define BOARD_SAMPLE_TTC_ID         XPAR_XTTCPS_1_DEVICE_ID
+#define BOARD_SAMPLE_TTC_ID         XPAR_XTTCPS_2_DEVICE_ID
 #else
 #define BOARD_CONSOLE_UART_ID       XPAR_XUARTPS_0_BASEADDR
 #define BOARD_PS_GPIO_ID            XPAR_XGPIOPS_0_BASEADDR
-#define BOARD_XADC_ID               XPAR_XADCPS_0_BASEADDR
-#define BOARD_SAMPLE_TTC_ID         XPAR_XTTCPS_1_BASEADDR
+#define BOARD_XADC_ID               0U
+#define BOARD_SAMPLE_TTC_ID         XPAR_XTTCPS_2_BASEADDR
 #endif
 
 /* -------------------------------------------------------------------------
@@ -66,15 +70,22 @@
 /* -------------------------------------------------------------------------
  * Sample timer
  *
- * TTC0 counter 1 (ps7_ttc_1), GIC SPI ID 43, level sensitive.
+ * TTC0 counter 2 (ps7_ttc_2), GIC ID 44, level sensitive.
  *
- * Counter 0 is left alone on purpose: depending on the BSP version and its
- * settings it can get claimed as the sleep timer or tick source, and two
- * owners of one counter is a miserable bug to chase.
+ * Stage 2 used counter 1. That collides with the SDT flow (Vitis 2023.2 and
+ * later): for a FreeRTOS BSP, xiltimer always enables a tick timer, and with
+ * TTC0 in the design its default pick is the middle TTC instance, ps7_ttc_1.
+ * Counter 0 can end up as the sleep timer in some configurations. Counter 2
+ * is claimed by neither default. sample_timer_init() refuses a counter that
+ * is already running, so a clash still fails loudly rather than killing the
+ * RTOS tick.
+ *
+ * Only the classic flow uses the plain GIC ID below. The SDT flow takes the
+ * encoded interrupt ID from the TTC config table instead - see sample_timer.c.
  *
  * TTC0 has to be enabled in the PS configuration - hw/scripts does that.
  * ------------------------------------------------------------------------- */
-#define BOARD_SAMPLE_TTC_IRQ        XPS_TTC0_1_INT_ID
+#define BOARD_SAMPLE_TTC_IRQ        XPS_TTC0_2_INT_ID
 
 /* -------------------------------------------------------------------------
  * Memory map

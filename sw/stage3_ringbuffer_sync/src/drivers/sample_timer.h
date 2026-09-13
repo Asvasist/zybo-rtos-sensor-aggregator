@@ -31,7 +31,8 @@ typedef enum
     SAMPLE_TIMER_ERR_LOOKUP,    /* TTC instance missing - TTC0 not enabled in the XSA? */
     SAMPLE_TIMER_ERR_INIT,
     SAMPLE_TIMER_ERR_RATE,      /* rate not reachable with 16-bit counter + prescaler */
-    SAMPLE_TIMER_ERR_IRQ        /* handler could not be installed on the GIC          */
+    SAMPLE_TIMER_ERR_IRQ,       /* handler could not be installed on the GIC          */
+    SAMPLE_TIMER_ERR_BUSY       /* counter already running - claimed as the RTOS tick? */
 } sample_timer_status_t;
 
 /* Configures the counter for rate_hz in interval mode and hooks up the IRQ. Doesn't start it. */
