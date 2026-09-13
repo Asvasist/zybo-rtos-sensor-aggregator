@@ -13,7 +13,7 @@
 #include "FreeRTOS.h"
 #include "task.h"
 
-#define APP_FW_VERSION              "0.3.0"
+#define APP_FW_VERSION              "0.4.0"
 
 /* ---- sampling -------------------------------------------------------- */
 
@@ -68,15 +68,35 @@
 
 #define APP_UI_SCAN_PERIOD_MS       10U     /* button debounce scan and UART RX poll */
 
+/* ---- watchdog ---------------------------------------------------------
+ *
+ * The supervisor task checks every APP_WDT_CHECK_PERIOD_MS that each task
+ * checked in within its limit, and only then kicks the SWDT. Limits are
+ * several times each task's normal loop period; the consumer's allows for
+ * a long report or a backlog drain.
+ *
+ * Worst case from a hang to the reset: limit + check period + SWDT timeout.
+ */
+#define APP_WDT_ENABLE              1       /* 0 while debugging with breakpoints */
+#define APP_WDT_TIMEOUT_MS          2000U
+#define APP_WDT_CHECK_PERIOD_MS     250U
+#define APP_WDT_LIMIT_PRODUCER_MS   500U    /* 5 sample periods */
+#define APP_WDT_LIMIT_UI_MS         500U
+#define APP_WDT_LIMIT_CONSUMER_MS   2000U
+
+/* Terminal keys 1-4 deliberately hang a task. Bring-up only - set to 0 for a release build. */
+#define APP_WDT_TEST_COMMANDS       1
+
 /* ---- priorities -------------------------------------------------------
  *
- * Producer on top, so sample timing depends only on the ISR and on itself.
- * UI above the consumer, so key presses and buttons are picked up even while
- * a long report is going out. Consumer at the bottom: it busy-waits on the
- * UART TX FIFO and must never hold anything else up.
- *
- * The gaps are intentional - later stages slot tasks in between.
+ * Watchdog supervisor above everything, so a busy loop in any other task
+ * can't stop it from noticing. Producer next, so sample timing depends only
+ * on the ISR and on itself. UI above the consumer, so key presses and buttons
+ * are picked up even while a long report is going out. Consumer at the
+ * bottom: it busy-waits on the UART TX FIFO and must never hold anything
+ * else up.
  */
+#define APP_PRIO_WATCHDOG           (tskIDLE_PRIORITY + 5U)
 #define APP_PRIO_PRODUCER           (tskIDLE_PRIORITY + 4U)
 #define APP_PRIO_UI                 (tskIDLE_PRIORITY + 2U)
 #define APP_PRIO_CONSUMER           (tskIDLE_PRIORITY + 1U)
@@ -87,6 +107,7 @@
  * are first guesses with margin - check the headroom with 'd' after a few
  * minutes of running and trim.
  */
+#define APP_STACK_WATCHDOG          512U
 #define APP_STACK_PRODUCER          512U
 #define APP_STACK_UI                512U
 #define APP_STACK_CONSUMER          1024U

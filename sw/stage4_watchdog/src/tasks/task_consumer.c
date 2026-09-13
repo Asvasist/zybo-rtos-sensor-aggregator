@@ -10,10 +10,12 @@
 #include "app_config.h"
 #include "console.h"
 #include "gpio_drv.h"
+#include "reset_cause.h"
 #include "sensor_log.h"
 #include "sensor_record.h"
 #include "task_producer.h"
 #include "task_ui.h"
+#include "task_watchdog.h"
 #include "uart_drv.h"
 #include "uptime.h"
 #include "xadc_drv.h"
@@ -70,9 +72,59 @@ static void consumer_print_help(void)
                    APP_SAMPLE_RATE_HZ, APP_SLOW_STREAM_DIVIDER, APP_SAMPLE_RATE_HZ / APP_SLOW_STREAM_DIVIDER);
     console_write("  p          pause/resume reading the log (samples keep accumulating)\n"
                   "  t          print the newest sample once\n"
-                  "  d          diagnostics (timing, log, mutex, queue, stacks, heap)\n"
+                  "  d          diagnostics (timing, log, mutex, queue, watchdog, heap)\n"
+#if (APP_WDT_TEST_COMMANDS != 0)
+                  "  1 2 3      watchdog test: hang the producer / ui / consumer task\n"
+                  "  4          watchdog test: interrupts off, whole system stops\n"
+#endif
                   "  h / ?      this help\n\n");
 }
+
+#if (APP_WDT_TEST_COMMANDS != 0)
+static void consumer_run_wdt_test(char key)
+{
+    switch (key)
+    {
+    case '1':
+        console_write("TEST: producer stuck in a busy loop\n");
+        break;
+    case '2':
+        console_write("TEST: ui task blocked forever\n");
+        break;
+    case '3':
+        console_write("TEST: consumer stuck in a busy loop\n");
+        break;
+    case '4':
+        console_write("TEST: interrupts off, nothing runs any more\n");
+        break;
+    default:
+        return;
+    }
+
+    console_write("expect the watchdog to reset the board within a few seconds\n");
+    uart_drv_wait_tx_idle();
+
+    switch (key)
+    {
+    case '1':
+        task_watchdog_inject_hang(WDOG_CLIENT_PRODUCER);
+        break;
+    case '2':
+        task_watchdog_inject_hang(WDOG_CLIENT_UI);
+        break;
+    case '3':
+        /* takes effect at the end of this loop pass */
+        task_watchdog_inject_hang(WDOG_CLIENT_CONSUMER);
+        break;
+    default:
+        /* Nothing checks in and nothing kicks - only the SWDT itself can get out of this. */
+        taskDISABLE_INTERRUPTS();
+        for (;;)
+        {
+        }
+    }
+}
+#endif
 
 static void consumer_print_sample_line(const sensor_record_t *record)
 {
@@ -157,6 +209,7 @@ static void consumer_print_stats(void)
     producer_stats_t        prod_stats;
     sensor_log_stats_t      log_stats;
     uart_drv_err_counters_t uart_errs;
+    wdog_stats_t            wdog_stats;
     uintptr_t               log_base;
     uint32_t                log_bytes;
     const uint32_t          now_ms = uptime_ms();
@@ -223,7 +276,22 @@ static void consumer_print_stats(void)
                    (unsigned long)uxTaskGetStackHighWaterMark(NULL));
 #endif
 
-    console_printf("  heap free       : %lu bytes\n\n", (unsigned long)xPortGetFreeHeapSize());
+    console_printf("  heap free       : %lu bytes\n", (unsigned long)xPortGetFreeHeapSize());
+
+    task_watchdog_get_stats(&wdog_stats);
+    console_printf("  last reset      : %s\n", reset_cause_name(reset_cause_get()));
+    if (wdog_stats.timeout_ms != 0U)
+    {
+        console_printf("  watchdog        : SWDT %lu ms, %lu kicks, worst silence producer %lu / ui %lu / consumer %lu ms\n\n",
+                       (unsigned long)wdog_stats.timeout_ms, (unsigned long)wdog_stats.kicks,
+                       (unsigned long)wdog_stats.worst_silence_ms[WDOG_CLIENT_PRODUCER],
+                       (unsigned long)wdog_stats.worst_silence_ms[WDOG_CLIENT_UI],
+                       (unsigned long)wdog_stats.worst_silence_ms[WDOG_CLIENT_CONSUMER]);
+    }
+    else
+    {
+        console_write("  watchdog        : SWDT not running (APP_WDT_ENABLE)\n\n");
+    }
 }
 
 static void consumer_process_record(const sensor_record_t *record)
@@ -341,6 +409,12 @@ static void consumer_handle_msg(const consumer_msg_t *msg)
         console_printf("unknown command '%c', 'h' for help\n", msg->key);
         break;
 
+#if (APP_WDT_TEST_COMMANDS != 0)
+    case CONSUMER_MSG_WDT_TEST:
+        consumer_run_wdt_test(msg->key);
+        break;
+#endif
+
     default:
         console_printf("WARN: unexpected message id %d\n", (int)msg->id);
         break;
@@ -418,6 +492,8 @@ static void consumer_task(void *task_arg)
 
         backlog_pending = consumer_drain_log();
         consumer_check_stall();
+
+        task_watchdog_checkin(WDOG_CLIENT_CONSUMER);
     }
 }
 

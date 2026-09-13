@@ -12,6 +12,7 @@
 #include "sensor_log.h"
 #include "sensor_record.h"
 #include "task_consumer.h"
+#include "task_watchdog.h"
 #include "uptime.h"
 
 /* What happened in one pass of the producer loop, for the statistics. */
@@ -207,6 +208,9 @@ static void producer_task(void *task_arg)
         producer_update_stats(&record, prev_capture_us, &cycle);
 
         prev_capture_us = record.capture_us;
+
+        /* Only after a real sample - a sample timer that stops firing ends in a reset too. */
+        task_watchdog_checkin(WDOG_CLIENT_PRODUCER);
     }
 }
 

@@ -34,7 +34,8 @@ typedef enum
     CONSUMER_MSG_PRINT_NEWEST,      /* newest sample once, stream or not              */
     CONSUMER_MSG_STATS,             /* diagnostics                                    */
     CONSUMER_MSG_HELP,
-    CONSUMER_MSG_UNKNOWN_KEY        /* key carries the character                      */
+    CONSUMER_MSG_UNKNOWN_KEY,       /* key carries the character                      */
+    CONSUMER_MSG_WDT_TEST           /* key '1'..'4' selects the hang to inject        */
 } consumer_msg_id_t;
 
 typedef struct

@@ -8,6 +8,7 @@
 #include "app_config.h"
 #include "gpio_drv.h"
 #include "task_consumer.h"
+#include "task_watchdog.h"
 #include "uart_drv.h"
 
 static TaskHandle_t s_ui_handle;
@@ -68,6 +69,16 @@ static void ui_handle_key(char key)
         ui_send(CONSUMER_MSG_HELP, key);
         break;
 
+#if (APP_WDT_TEST_COMMANDS != 0)
+    case '1':
+    case '2':
+    case '3':
+    case '4':
+        /* Via the consumer so the warning gets printed before anything hangs. */
+        ui_send(CONSUMER_MSG_WDT_TEST, key);
+        break;
+#endif
+
     case '\r':
     case '\n':
     case ' ':
@@ -121,6 +132,8 @@ static void ui_task(void *task_arg)
         {
             ui_handle_key(rx_char);
         }
+
+        task_watchdog_checkin(WDOG_CLIENT_UI);
     }
 }
 
