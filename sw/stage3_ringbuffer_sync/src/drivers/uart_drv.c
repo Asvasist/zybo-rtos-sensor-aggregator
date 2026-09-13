@@ -51,7 +51,7 @@ static void uart_collect_line_errors(void)
 uart_drv_status_t uart_drv_init(uint32_t baud_rate)
 {
     XUartPs_Config *uart_cfg;
-    XUartPs_Format  line_format;
+    XUartPsFormat   line_format;
 
     s_uart_ready = false;
 
