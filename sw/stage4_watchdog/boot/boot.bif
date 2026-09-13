@@ -1,0 +1,8 @@
+// SD card boot image: FSBL + application, no bitstream (empty PL).
+// Paths assume the Vitis workspace at sw/workspace with the component names
+// from the stage 3 walkthrough. Run bootgen from this folder - see the Readme.
+the_ROM_image:
+{
+    [bootloader] ../../workspace/zybo_platform/export/zybo_platform/sw/boot/fsbl.elf
+    ../../workspace/sensor_app/build/sensor_app.elf
+}

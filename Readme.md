@@ -2,10 +2,10 @@
 
 A FreeRTOS sensor logger on the Digilent Zybo (Zynq-7000). A high-priority
 task samples the Zynq's on-chip XADC (die temperature and supply rails) plus
-the board's buttons/switches on a hardware timer tick, stores the samples in a
+the board's PS push buttons on a hardware timer tick, stores the samples in a
 mutex-protected ring buffer in DDR, and a low-priority task formats and logs
 them over UART. A hardware watchdog resets the board if any task stops making
-progress.
+progress. The slide switches and PL buttons follow with the PL design.
 
 What it exercises:
 
@@ -22,10 +22,21 @@ Firmware first, entirely on the PS. The PL design comes last, once the software 
 | 1 | Bare-metal drivers: UART, MIO GPIO, XADC; temperature on the terminal | `sw/stage1_baremetal_drivers` | Code complete, builds against the 2025.2 BSP, board run pending |
 | 2 | FreeRTOS: timer-paced producer (100 ms XADC), consumer printing over UART | `sw/stage2_freertos_tasks` | Code complete, builds against the 2025.2 BSP, board run pending |
 | 3 | Ring buffer in DDR, mutex protection, queue between tasks | `sw/stage3_ringbuffer_sync` | First board run on a Zybo Z7-20 done, its two defects fixed, re-run pending |
-| 4 | Zynq hardware watchdog + dedicated kick task, hang detection; confirm the MIO button wiring | - | Planned |
-| 5 | PL design: AXI GPIO for SW0-3 / BTN0-3, full hardware platform | `hw/` | Planned |
+| 4 | Zynq system watchdog, supervisor task with per-task check-ins, reset cause | `sw/stage4_watchdog` | Code complete, builds against the 2025.2 BSP, board run pending |
+| 5 | PL design: AXI GPIO for SW0-3 / BTN0-3, full hardware platform | `hw/` | Later |
 
-Each stage has its own Readme with design notes, build steps and a bring-up checklist.
+Stage 4 is the complete firmware - it contains everything from the earlier
+stages. Each stage has its own Readme with design notes, build steps and a
+bring-up checklist; the stage 3 Readme has the full Vivado/Vitis 2025.2
+walkthrough, the stage 4 Readme adds the watchdog and SD boot parts.
+
+## Quick start
+
+1. Build the XSA: `hw/scripts/create_ps_platform.tcl` (see `hw/Readme.md`).
+2. In Vitis 2025.2 create a FreeRTOS platform from it and an empty application
+   (stage 3 Readme, *Running on the board*).
+3. Copy `sw/stage4_watchdog/src` into the application's `src/` flat, build, run.
+   Terminal at 115200 8N1, `h` for the commands.
 
 ## Repository layout
 
@@ -42,14 +53,19 @@ sw/
     src/                         FreeRTOS application sources
   stage3_ringbuffer_sync/
     Readme.md                    design, 2025.2 board walkthrough, bring-up log
+    src/                         same layout as stage 4, without the watchdog
+    tests/host/                  unit tests that run on a PC
+  stage4_watchdog/
+    Readme.md                    watchdog design, SD boot, tests
     src/
       main.c
       config/                    board map, application tuning
-      drivers/                   UART, GPIO, XADC, TTC sample timer
-      system/                    console, uptime, fault handling, RTOS hooks
+      drivers/                   UART, GPIO, XADC, TTC sample timer, SWDT, SLCR
+      system/                    console, uptime, reset cause, fault handling, RTOS hooks
       datalog/                   sample record, ring buffer, sensor log
-      tasks/                     producer, consumer, UI
+      tasks/                     watchdog supervisor, producer, consumer, UI
     tests/host/                  unit tests that run on a PC
+    boot/boot.bif                SD card boot image (FSBL + application)
 ```
 
 Vitis 2025.2 only compiles sources sitting directly in an application's

@@ -55,9 +55,13 @@ apply_bd_automation -rule xilinx.com:bd_rule:processing_system7 \
 # buttons at "pressed"; the original Zybo preset already disables them. The
 # firmware also clears these pull-ups at boot, so an XSA built without this
 # still works - this just keeps the hardware description honest.
+#
+# The system watchdog (SWDT) is used from stage 4 on. Its reset goes to the
+# PS internally, the EMIO outputs stay unconnected.
 set_property -dict [list \
     CONFIG.PCW_USE_M_AXI_GP0          {0} \
     CONFIG.PCW_TTC0_PERIPHERAL_ENABLE {1} \
+    CONFIG.PCW_WDT_PERIPHERAL_ENABLE  {1} \
     CONFIG.PCW_MIO_50_PULLUP          {disabled} \
     CONFIG.PCW_MIO_51_PULLUP          {disabled} \
 ] $ps7

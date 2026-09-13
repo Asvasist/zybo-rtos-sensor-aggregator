@@ -23,6 +23,10 @@ build/
 *.d
 *.map
 
+# ---- boot images ----
+BOOT.BIN
+*.bin
+
 # ---- host unit test binaries ----
 sw/*/tests/host/test_*
 !sw/*/tests/host/test_*.c
