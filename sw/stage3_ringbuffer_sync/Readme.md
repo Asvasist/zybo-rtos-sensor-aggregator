@@ -1,6 +1,7 @@
 # Stage 3 - Ring buffer in DDR, mutex, message queue
 
-Status: **code complete, ring buffer unit tested on the host, bring-up on the board pending**
+Status: **first board run done on a Zybo Z7-20 (Vivado/Vitis 2025.2). The two
+defects it found are fixed; re-run pending.** Ring buffer unit tested on the host.
 
 Stage 2 handed samples over through a single "newest value" slot, so a slow
 consumer lost data. Now every sample goes into a **ring buffer in DDR** that
@@ -15,9 +16,10 @@ add up.
 
 ## What changed from stage 2
 
-- New `ring_buffer`: overwrite-oldest FIFO of sensor records, power-of-two
+New in this stage:
+- `datalog/ring_buffer`: overwrite-oldest FIFO of sensor records, power-of-two
   capacity, no locking, no target dependencies. Unit tested on a PC (`tests/host`).
-- New `sensor_log`: 4096-record storage in DDR (`.bss.sensor_log`) plus the ring
+- `datalog/sensor_log`: 4096-record storage in DDR (`.bss.sensor_log`) plus the ring
   buffer and a FreeRTOS mutex. This is the only way into the buffer.
 - `sensor_mailbox` removed. `sensor_record_t` moved to its own header.
 - Producer: writes every sample into the log with a bounded mutex wait, and
@@ -27,20 +29,32 @@ add up.
   while it prints.
 - UI: sends typed messages. Unknown keys carry the character. A full queue
   drops the message and counts it.
-- Sample timer moved from TTC0 counter 1 to **counter 2** (GIC ID 44). With a
-  FreeRTOS BSP in the SDT flow (Vitis 2023.2 and later), xiltimer claims
-  counter 1 as the RTOS tick by default.
-- `sample_timer`: in the SDT flow the interrupt ID now comes from the TTC
-  config table (encoded SPI number), not the plain GIC ID, which the SDT
-  interrupt wrapper would have offset by 32. The driver also refuses a counter
-  that is already running (`SAMPLE_TIMER_ERR_BUSY`) instead of taking it over.
-- XADC lookup in the SDT flow uses base address 0 ("first instance"), the same
-  as the Xilinx SDT examples.
 - New terminal command `p`: pause/resume reading the log, to exercise the buffer.
 - Diagnostics (`d`) extended with log, mutex and queue statistics.
-- `board_zybo.h`: DDR address window, used to verify where the log landed.
-- Drivers, sample timer, fault handler and hooks are unchanged apart from comments.
-- Hardware: no change from stage 2.
+- Sources grouped by layer: `config/`, `drivers/`, `system/`, `datalog/`, `tasks/`.
+
+Fixes from bringing it up with Vitis 2025.2 (SDT flow). Stages 1 and 2 share
+this code, so the fixes were carried back to them too:
+- **Zero timestamps.** The SDT xiltimer library only starts the Cortex-A9
+  global timer on the first sleep call, and this firmware never sleeps.
+  `uptime_init()` now starts it at boot, and `main()` halts with a clear
+  message if it doesn't run.
+- **Buttons stuck at 1.** The Zybo Z7 board preset enables the internal
+  pull-ups on MIO50/51; the original Zybo preset disables them. `gpio_drv` now
+  sets the pad pull-up from `board_zybo.h` itself, and the hardware script
+  disables them in the XSA as well.
+- **Sample timer on TTC0 counter 2** (GIC ID 44). In the SDT flow its interrupt
+  ID comes from the TTC config table (the encoded SPI number, which the SDT
+  interrupt wrapper offsets by 32), and a counter that is already running is
+  refused instead of taken over.
+- Header names that differ in the real 2025.2 BSP: `XUartPsFormat`,
+  `vTaskNotifyGiveFromISR()`, `xiltimer.h` instead of `xtime_l.h`.
+  `COUNTS_PER_SECOND` is parenthesised before use, because xiltimer generates
+  it without parentheses.
+- XADC lookup in the SDT flow by base address 0 ("first instance"), as in the
+  Xilinx SDT examples.
+- Stall detection reads a plain sample counter instead of copying the full
+  producer statistics on every consumer pass.
 
 ## Architecture
 
@@ -59,7 +73,7 @@ add up.
 ```
                  IRQ 44
   TTC0 counter 2 ------> sample_timer_isr()
-                                | xTaskNotifyGiveFromISR()
+                                | vTaskNotifyGiveFromISR()
                                 v
                          +-------------+   XADCIF   +------+
                          |  producer   |<---------->| XADC |
@@ -135,10 +149,10 @@ script places all of `.bss` in `ps7_ddr_0`. The storage array is named
 `.bss.sensor_log`, so the stock script still collects it into `.bss` (zeroed
 at startup, no extra linker work), but it keeps its own entry in the `.map`
 file. At runtime `sensor_log_init()` checks the address against the DDR window
-and refuses to start if a modified linker script moved it into OCM. The
-banner prints where it actually landed. Static storage rather than heap: the
-size is fixed at link time, there's no fragmentation, and it's visible in the
-map.
+and refuses to start if a modified linker script moved it into OCM. The banner
+prints where it actually landed: `0x00130DB0` on the first board run. Static
+storage rather than heap: the size is fixed at link time, there's no
+fragmentation, and it's visible in the map.
 
 **Mutex rules.**
 - Every ring buffer access goes through `sensor_log`, and therefore through the mutex.
@@ -198,6 +212,23 @@ consumer lost  ==  log overwritten  +  producer drops (lock timeout)
 If they don't, something is corrupting the buffer - which is exactly the
 failure this stage exists to prevent.
 
+**Time base under the SDT BSP.** Timestamps come from the Cortex-A9 global
+timer (`XTime_GetTime()`). The classic BSP started that timer in its C
+startup code. The SDT xiltimer library starts it (and zeroes it) only on the
+first `usleep()`/`sleep()`, so a firmware that never sleeps reads 0 forever.
+`uptime_init()` makes one 1 us sleep through exactly that path at boot. It's a
+plain busy-wait, safe before the scheduler starts. xiltimer never zeroes the
+timer a second time, so a sleep anywhere later can't make the uptime jump back.
+
+**Button pads.** BTN4/BTN5 are on MIO50/51 with pull-down resistors on the
+board. Digilent's original Zybo preset disables the Zynq's internal pull-ups
+on those pins. The Zybo Z7 preset leaves them at Vivado's default (enabled),
+which holds both buttons at "pressed". `gpio_drv_init()` writes the pad
+configuration through the SLCR (unlock, clear the pull-up bit, re-lock), so
+the firmware no longer depends on which preset built the XSA. The wiring
+assumption is confirmed on the board in stage 4. If it's wrong, it's a
+two-line change in `board_zybo.h`.
+
 ## FreeRTOS BSP settings
 
 Everything from stage 2, plus:
@@ -216,21 +247,36 @@ static and doesn't come from the FreeRTOS heap.
 
 ```
 src/
-  main.c                  peripheral + log init, task creation, scheduler start
-  board/board_zybo.h      instance IDs, pins, TTC, DDR window              [DDR window new]
-  drivers/                uart_drv, gpio_drv, xadc_drv, sample_timer     (unchanged)
-  app/
-    app_config.h          rates, priorities, stacks, log and queue sizing
-    sensor_record.h       the 32-byte sample record                       [new]
-    ring_buffer.*         overwrite-oldest FIFO, no locking                [new]
-    sensor_log.*          DDR storage + ring buffer + mutex                [new]
-    task_producer.*       timer-paced sampling, log writes, doorbell
-    task_consumer.*       queue, log draining, console gatekeeper
-    task_ui.*             buttons and keys -> queue messages
-    fault.*, rtos_hooks.c, uptime.*, console.*                            (as stage 2)
+  main.c                    startup: peripherals, log, tasks, scheduler
+  config/
+    board_zybo.h            instance IDs, pins, pad settings, TTC, DDR window
+    app_config.h            rates, priorities, stack sizes, log and queue sizing
+  drivers/                  peripheral drivers, no RTOS objects of their own
+    uart_drv.*              console UART, polled
+    gpio_drv.*              LD4, BTN4/BTN5 debouncer, button pad pull-ups
+    xadc_drv.*              XADC sequencer and readout
+    sample_timer.*          TTC0 interval timer and its interrupt
+  system/                   services every layer uses
+    console.*               printf over UART, fixed-point formatting
+    uptime.*                microsecond time base (global timer)
+    fault.*                 last-resort error reporting and halt
+    rtos_hooks.c            stack overflow / malloc failed hooks
+  datalog/                  the data path between producer and consumer
+    sensor_record.h         the 32-byte sample record
+    ring_buffer.*           overwrite-oldest FIFO, no locking
+    sensor_log.*            DDR storage + ring buffer + mutex
+  tasks/                    the three FreeRTOS tasks
+    task_producer.*         timer-paced sampling, log writes, doorbell
+    task_consumer.*         queue, log draining, console gatekeeper
+    task_ui.*               buttons and keys -> queue messages
 tests/
-  host/test_ring_buffer.c unit tests for ring_buffer.c, runs on a PC       [new]
+  host/test_ring_buffer.c   unit tests for ring_buffer.c, runs on a PC
 ```
+
+Dependencies only point downwards: `tasks` > `datalog` > `system` > `drivers` >
+`config` and the BSP. A layer may skip levels, but nothing includes anything
+above itself. Includes are by file name, so the folders cost nothing at build
+time.
 
 ## Unit tests (host)
 
@@ -239,7 +285,7 @@ ordinary PC compiler:
 
 ```
 cd sw/stage3_ringbuffer_sync/tests/host
-gcc -std=c11 -Wall -Wextra -Werror -I../../src/app -I../../src/drivers test_ring_buffer.c ../../src/app/ring_buffer.c -o test_ring_buffer
+gcc -std=c11 -Wall -Wextra -Werror -I../../src/datalog -I../../src/drivers test_ring_buffer.c ../../src/datalog/ring_buffer.c -o test_ring_buffer
 ./test_ring_buffer
 ```
 
@@ -273,6 +319,8 @@ Either run `hw/scripts/create_ps_platform.tcl` (see `hw/Readme.md`), or build it
 6. Double-click the Zynq block:
    - *PS-PL Configuration* > AXI Non Secure Enablement > GP Master AXI Interface > **untick M AXI GP0 interface**
    - *MIO Configuration* > Application Processor Unit > **tick Timer 0** (IO: EMIO)
+   - *MIO Configuration* > MIO table, rows 50 and 51 > **Pullup: disabled**. The firmware
+     does this at boot too, so an XSA without it still works.
    - check only, don't change: *I/O Peripherals* has UART 1 on MIO 48..49 and GPIO MIO ticked
    - OK
 7. **Validate Design** (F6). It should report no errors.
@@ -290,23 +338,32 @@ Either run `hw/scripts/create_ps_platform.tcl` (see `hw/Readme.md`), or build it
    - **freertos**: the defaults are fine. Check `freertos_use_mutexes` is on and
      `freertos_check_for_stack_overflow` is 2.
    - **xiltimer**: `XILTIMER_tick_timer` must **not** be `ps7_ttc_2` (the sample
-     timer). The default and the SCU timer are both fine.
+     timer). On the first run the default put the tick on the SCU timer, which is fine.
 4. Select the platform in the FLOW panel > **Build**.
 
 ### 3. Application in Vitis
 
 1. File > New Component > **Application** > name `sensor_app` > platform `zybo_platform` >
    domain `freertos_ps7_cortexa9_0` > Finish.
-2. Copy every `.c` and `.h` from this stage's `src/` tree **flat** into the component's
-   `src/` folder. The Vitis app template only compiles sources directly in `src/`,
-   not in subfolders, and the quoted includes then resolve without any include
-   path settings:
+2. Copy every `.c` and `.h` from this stage's `src/` tree **flat** into the
+   component's `src/` folder, next to the files Vitis generated there. Never
+   replace that folder: it holds `CMakeLists.txt`, `UserConfig.cmake` and
+   `lscript.ld`. The Vitis app template only compiles sources directly in
+   `src/`, not in subfolders, and the quoted includes then resolve without any
+   include path settings.
+
+   From a Command Prompt (`cmd`):
+   ```bat
+   for /R "<repo>\sw\stage3_ringbuffer_sync\src" %f in (*.c *.h) do copy /Y "%f" "<workspace>\sensor_app\src\"
+   ```
+   Or from PowerShell:
    ```powershell
-   Get-ChildItem "<repo>\sw\stage3_ringbuffer_sync\src" -Recurse -Include *.c,*.h |
-       Copy-Item -Destination "<workspace>\sensor_app\src" -Force
+   Get-ChildItem "<repo>\sw\stage3_ringbuffer_sync\src" -Recurse -Include *.c,*.h | Copy-Item -Destination "<workspace>\sensor_app\src" -Force
    ```
    Don't copy `tests/`.
-3. Select `sensor_app` > **Build**. It should finish without errors or warnings from these sources.
+3. Select `sensor_app` > **Build**. The only warnings come from the generated
+   `xparameters.h` (`XPS_BOARD_ZYBO-Z7-20`, harmless). The project sources
+   compile without warnings.
 
 ### 4. Board and run
 
@@ -338,28 +395,37 @@ left out. That's expected.
 | `h` / `?` | | help |
 | other | | `unknown command 'x'` - the key travels in the queue message |
 
-Startup (the address depends on the link):
+Startup, as printed on the first Zybo Z7-20 run:
 
 ```
 ========================================================
  Zybo sensor aggregator - stage 3, log + mutex + queue
- fw 0.3.0, built Sep 12 2026 14:02:51
+ fw 0.3.0, built Sep 13 2026 12:45:44
 ========================================================
 XADC up: continuous sequencer, 16x averaging, calibration on
-sensor log: 4096 records, 131072 bytes at 0x<addr> (DDR)
+sensor log: 4096 records, 131072 bytes at 0x00130DB0 (DDR)
 tasks created, starting scheduler
-scheduler running, sample period 99998 us
+scheduler running, sample period 100000 us
+```
+
+Stream after the fixes. The sensor values are from the first run; the
+timestamps should step by 100 ms, and the buttons read 0 until pressed:
+
+```
+[     0.518] #1      T 38.51 C | VCCINT 0.990 V | VCCPINT 0.986 V | BTN4 0 BTN5 0
+[     0.618] #2      T 38.51 C | VCCINT 0.990 V | VCCPINT 0.986 V | BTN4 0 BTN5 0
+[     0.718] #3      T 38.39 C | VCCINT 0.990 V | VCCPINT 0.985 V | BTN4 0 BTN5 0
 ```
 
 Pause and resume - the backlog comes out in a burst, with the original timestamps and no gaps:
 
 ```
-[    20.118] #196    T 44.91 C | VCCINT 1.001 V | VCCPINT 1.000 V | BTN4 0 BTN5 0
+[    20.118] #196    T 39.87 C | VCCINT 0.990 V | VCCPINT 0.985 V | BTN4 0 BTN5 0
 log reading PAUSED - samples accumulate in the log
                                               ... 30 s pass, nothing printed, LD4 holds ...
 log reading RESUMED
-[    20.218] #197    T 44.91 C | VCCINT 1.001 V | VCCPINT 1.000 V | BTN4 0 BTN5 0
-[    20.318] #198    T 45.03 C | VCCINT 1.001 V | VCCPINT 1.000 V | BTN4 0 BTN5 0
+[    20.218] #197    T 39.99 C | VCCINT 0.990 V | VCCPINT 0.985 V | BTN4 0 BTN5 0
+[    20.318] #198    T 39.87 C | VCCINT 0.990 V | VCCPINT 0.985 V | BTN4 0 BTN5 0
 ...
 ```
 
@@ -368,26 +434,45 @@ Diagnostics layout (fill in the real numbers during bring-up):
 ```
 Diagnostics
   uptime          : <s>
-  sample period   : 99998 us (timer)
+  sample period   : 100000 us (timer)
   producer        : <n> samples, 0 overruns, 0 timeouts
   sample interval : min <n> us, max <n> us
   XADC read time  : max <n> us
   log write       : max <n> us incl. mutex wait, 0 dropped on lock timeout
   sensor log      : <n> / 4096 records waiting, peak <n>, 0 overwritten
   log mutex       : held max <n> us, 0 consumer lock timeouts
-  log storage     : 131072 bytes at 0x<addr> (DDR)
+  log storage     : 131072 bytes at 0x00130DB0 (DDR)
   consumer        : <n> received, 0 lost, stream on, every sample, draining on
   message queue   : peak <n> / 16, 0 UI messages dropped, 0 doorbell retries
   UART rx errors  : overrun 0, framing 0, parity 0
-  stack headroom  : producer <n>, ui <n>, consumer <n> words
   heap free       : <n> bytes
 ```
+
+## Bring-up log
+
+**Run 1 - 13 Sep 2026, Zybo Z7-20, Vivado/Vitis 2025.2, FreeRTOS platform**
+
+Worked:
+- the banner prints cleanly
+- the sensor log is in DDR at `0x00130DB0`
+- the scheduler starts, and the sample period reads 100000 us
+- 188 samples streamed with no sequence gaps
+- the readings are plausible: die temperature rising from 38.5 to 40.7 C as
+  the chip warmed up, VCCINT 0.990 V and VCCPINT 0.985 V (1.0 V nominal)
+
+Defects, both fixed since:
+- every timestamp was `0.000`: the global timer was never started under the SDT xiltimer
+- `BTN4 1 BTN5 1` on every line: the Z7 preset leaves the MIO50/51 pull-ups enabled
+
+Carried over to stage 4: confirm the button wiring on the Z7 (pressed = 1,
+released = 0), and run the full checklist below.
 
 ## Bring-up checklist
 
 Basic operation
 - [ ] Banner shows the log address inside DDR; the `.map` file shows `.bss.sensor_log` at the same address
-- [ ] Stream as in stage 2: 100 ms steps, no sequence gaps, LD4 at 1 Hz
+- [ ] Timestamps step by 100 ms, sequence numbers have no gaps, LD4 blinks at 1 Hz
+- [ ] BTN4/BTN5 read 0 when released and 1 while held; BTN4 prints one report per press
 - [ ] `d`: lost 0, overwritten 0, drops 0; log peak stays at 1-2 records; overruns 0
 - [ ] `d`: note the mutex hold max and log write max - both should be well under a millisecond
 
@@ -410,7 +495,6 @@ Queue
 
 Robustness carried over from stage 2
 - [ ] Dead timer test (`sample_timer_stop()` at seq 50): WARN after 1 s, even with draining paused
-- [ ] Stack headroom after a long run with a big backlog drain - the consumer's batch buffer is 512 bytes of stack
 
 ## Troubleshooting
 
@@ -418,7 +502,11 @@ Robustness carried over from stage 2
 |---------|--------------|
 | `#error sensor_log needs configUSE_MUTEXES = 1` | enable mutexes in the FreeRTOS BSP settings |
 | Build error on `XPAR_XTTCPS_2_*` | TTC0 not enabled in the XSA - tick Timer 0 in the Zynq block, re-export, update the platform |
-| Undefined references to functions in `app/` or `drivers/` files | sources were copied into subfolders - the Vitis app template only builds `src/*.c`, copy them flat |
+| Build fails, `CMakeLists.txt` or `lscript.ld` missing from the app | the app's `src/` folder was replaced by a copy - recreate the application component and copy the sources in flat |
+| Undefined references at link time | sources were copied into subfolders - the Vitis app template only builds `src/*.c`, copy them flat |
+| Every timestamp `0.000` | an old build without `uptime_init()` - the SDT global timer was never started |
+| `FATAL: uptime (global timer) init failed` | global timer still not counting - check the xiltimer sleep timer is left at Default |
+| BTN4/BTN5 always 1, or always 0 | button pad setting doesn't match the board - see `BOARD_MIO_BTN_*` in `board_zybo.h` |
 | `FATAL: sample timer init failed, code 2` | TTC instance not found - same XSA problem as above |
 | `FATAL: sample timer init failed, code 6` | counter already running - xiltimer tick_timer is set to `ps7_ttc_2`, change it |
 | Nothing after "scheduler running", LD4 not blinking, WARN line after 1 s | timer interrupt not arriving - check the XSA has TTC0 and the platform was rebuilt |
@@ -434,6 +522,8 @@ Robustness carried over from stage 2
 - Nothing notices a task that hangs. If the consumer got stuck while holding
   the mutex, the producer would drop every sample from then on, and the board
   would never recover. Stage 4: the hardware watchdog and task check-ins.
+- The button wiring on the Zybo Z7 is inferred from the board presets, not yet
+  confirmed with a press on the board. That check is on the stage 4 list.
 - The log lives in RAM and is lost on reset.
 - UART TX is still polled, so the consumer busy-waits on the FIFO at the lowest priority.
 
@@ -441,4 +531,5 @@ Robustness carried over from stage 2
 
 The Zynq system watchdog (SWDT) and a dedicated task that only kicks it when
 every other task has checked in recently. A hang anywhere means no kick, and
-the board resets.
+the board resets. Bring-up for stage 4 starts with the stage 3 re-run and the
+button wiring check.

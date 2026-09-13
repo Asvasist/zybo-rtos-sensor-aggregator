@@ -38,8 +38,11 @@ Output:
 | TTC0 | counter 2 / IRQ 44 from stage 3 (counter 1 / IRQ 43 in stage 2), outputs on EMIO (unused) | 100 ms sample timer | stage 2 |
 | DDR3 | 512 MB (original Zybo), 1 GB (Zybo Z7) | code, data, sensor log (stage 3) | - |
 
-Everything except TTC0 comes from the board preset. TTC0 is switched on
-explicitly by the script. An XSA exported before stage 2 may not have it -
+Everything except TTC0 and the button pad pull-ups comes from the board
+preset. The script switches TTC0 on and disables the internal pull-ups on
+MIO50/51. The Zybo Z7 preset leaves those enabled, which makes BTN4/BTN5 read
+as permanently pressed. The firmware clears them at boot as well, so an older
+XSA still works. An XSA exported before stage 2 may not have it -
 the build then fails on the missing `XPAR_XTTCPS_*` definitions, and
 regenerating the XSA fixes it.
 
@@ -50,5 +53,6 @@ The stage 3 Readme has the full Vivado and Vitis 2025.2 walkthrough.
 If the project is built by hand in the GUI instead of the script: add a ZYNQ7
 Processing System, run block automation with "Apply Board Preset" ticked,
 untick M_AXI_GP0 under PS-PL configuration, tick TTC0 under MIO configuration
-> Application Processor Unit > Timer 0, create the HDL wrapper and export the
-hardware (no bitstream).
+> Application Processor Unit > Timer 0, set Pullup to *disabled* for MIO 50
+and 51 in the MIO configuration table, create the HDL wrapper and export the
+hardware (no bitstream). The step-by-step version is in the stage 3 Readme.

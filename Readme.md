@@ -19,10 +19,10 @@ Firmware first, entirely on the PS. The PL design comes last, once the software 
 
 | Stage | Scope | Folder | Status |
 |-------|-------|--------|--------|
-| 1 | Bare-metal drivers: UART, MIO GPIO, XADC; temperature on the terminal | `sw/stage1_baremetal_drivers` | Code complete, board bring-up pending |
-| 2 | FreeRTOS: timer-paced producer (100 ms XADC), consumer printing over UART | `sw/stage2_freertos_tasks` | Code complete, board bring-up pending |
-| 3 | Ring buffer in DDR, mutex protection, queue between tasks | `sw/stage3_ringbuffer_sync` | Code complete, ring buffer host-tested, board bring-up pending |
-| 4 | Zynq hardware watchdog + dedicated kick task, hang detection | - | Planned |
+| 1 | Bare-metal drivers: UART, MIO GPIO, XADC; temperature on the terminal | `sw/stage1_baremetal_drivers` | Code complete, builds against the 2025.2 BSP, board run pending |
+| 2 | FreeRTOS: timer-paced producer (100 ms XADC), consumer printing over UART | `sw/stage2_freertos_tasks` | Code complete, builds against the 2025.2 BSP, board run pending |
+| 3 | Ring buffer in DDR, mutex protection, queue between tasks | `sw/stage3_ringbuffer_sync` | First board run on a Zybo Z7-20 done, its two defects fixed, re-run pending |
+| 4 | Zynq hardware watchdog + dedicated kick task, hang detection; confirm the MIO button wiring | - | Planned |
 | 5 | PL design: AXI GPIO for SW0-3 / BTN0-3, full hardware platform | `hw/` | Planned |
 
 Each stage has its own Readme with design notes, build steps and a bring-up checklist.
@@ -41,10 +41,20 @@ sw/
     Readme.md
     src/                         FreeRTOS application sources
   stage3_ringbuffer_sync/
-    Readme.md
-    src/                         FreeRTOS application sources
+    Readme.md                    design, 2025.2 board walkthrough, bring-up log
+    src/
+      main.c
+      config/                    board map, application tuning
+      drivers/                   UART, GPIO, XADC, TTC sample timer
+      system/                    console, uptime, fault handling, RTOS hooks
+      datalog/                   sample record, ring buffer, sensor log
+      tasks/                     producer, consumer, UI
     tests/host/                  unit tests that run on a PC
 ```
+
+Vitis 2025.2 only compiles sources sitting directly in an application's
+`src/` folder, so a stage's sources are copied in flat. The walkthrough in
+the stage 3 Readme shows how.
 
 Each stage is a complete, self-contained application source tree, so any
 stage can be built and run on its own. Drivers are carried forward from the
@@ -58,7 +68,8 @@ are regenerated from the scripts and sources.
 
 - Digilent Zybo, Zybo Z7-10 or Zybo Z7-20
 - Micro-USB cable on the PROG/UART port, serial terminal at 115200 8N1
-- Vivado + Vitis (classic or Unified IDE; the sources handle both BSP flows)
+- Vivado + Vitis (classic or Unified IDE; the sources handle both BSP flows).
+  Brought up with 2025.2 on a Zybo Z7-20.
 - Digilent board files installed in Vivado
 
 ## References
