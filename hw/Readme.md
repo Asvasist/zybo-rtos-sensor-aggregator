@@ -35,13 +35,17 @@ Output:
 | UART1 | MIO48 TX / MIO49 RX, USB-UART on the PROG/UART port | console | stage 1 |
 | GPIO | MIO7 (LD4), MIO50 (BTN4), MIO51 (BTN5) | heartbeat LED, buttons | stage 1 |
 | XADC | PS-XADC interface (DevC), no PL wiring needed | temperature, supply rails | stage 1 |
-| TTC0 | counter 1, IRQ 43, outputs on EMIO (unused) | 100 ms sample timer | stage 2 |
-| DDR3 | 512 MB (original Zybo), 1 GB (Zybo Z7) | code, data, ring buffer later | - |
+| TTC0 | counter 2 / IRQ 44 from stage 3 (counter 1 / IRQ 43 in stage 2), outputs on EMIO (unused) | 100 ms sample timer | stage 2 |
+| DDR3 | 512 MB (original Zybo), 1 GB (Zybo Z7) | code, data, sensor log (stage 3) | - |
 
 Everything except TTC0 comes from the board preset. TTC0 is switched on
 explicitly by the script. An XSA exported before stage 2 may not have it -
-the stage 2 build then fails on the missing `XPAR_XTTCPS_1_*` definitions,
-and regenerating the XSA fixes it.
+the build then fails on the missing `XPAR_XTTCPS_*` definitions, and
+regenerating the XSA fixes it.
+
+With a FreeRTOS BSP in the SDT flow (Vitis 2023.2 and later) one TTC0 counter
+becomes the RTOS tick by default - that's why stage 3 samples on counter 2.
+The stage 3 Readme has the full Vivado and Vitis 2025.2 walkthrough.
 
 If the project is built by hand in the GUI instead of the script: add a ZYNQ7
 Processing System, run block automation with "Apply Board Preset" ticked,

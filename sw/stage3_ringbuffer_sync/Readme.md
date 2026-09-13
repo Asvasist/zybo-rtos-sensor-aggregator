@@ -27,6 +27,15 @@ add up.
   while it prints.
 - UI: sends typed messages. Unknown keys carry the character. A full queue
   drops the message and counts it.
+- Sample timer moved from TTC0 counter 1 to **counter 2** (GIC ID 44). With a
+  FreeRTOS BSP in the SDT flow (Vitis 2023.2 and later), xiltimer claims
+  counter 1 as the RTOS tick by default.
+- `sample_timer`: in the SDT flow the interrupt ID now comes from the TTC
+  config table (encoded SPI number), not the plain GIC ID, which the SDT
+  interrupt wrapper would have offset by 32. The driver also refuses a counter
+  that is already running (`SAMPLE_TIMER_ERR_BUSY`) instead of taking it over.
+- XADC lookup in the SDT flow uses base address 0 ("first instance"), the same
+  as the Xilinx SDT examples.
 - New terminal command `p`: pause/resume reading the log, to exercise the buffer.
 - Diagnostics (`d`) extended with log, mutex and queue statistics.
 - `board_zybo.h`: DDR address window, used to verify where the log landed.
@@ -48,8 +57,8 @@ add up.
 | producer statistics | struct | ~70 B | critical section (short copy, as in stage 2) |
 
 ```
-                 IRQ 43
-  TTC0 counter 1 ------> sample_timer_isr()
+                 IRQ 44
+  TTC0 counter 2 ------> sample_timer_isr()
                                 | xTaskNotifyGiveFromISR()
                                 v
                          +-------------+   XADCIF   +------+
@@ -246,13 +255,75 @@ Current result: `722811 checks, 0 failed`. To confirm the tests have teeth, a
 deliberately broken buffer (tail not advanced on overwrite) makes them fail
 within the first 100 random steps.
 
-## Build and run
+## Running on the board (Vivado / Vitis 2025.2)
 
-Same as stage 2 - FreeRTOS platform from the stage 2 XSA (TTC0 enabled), copy
-this stage's `src/` into a FreeRTOS application, add the include folders
-`src/board`, `src/drivers`, `src/app`, and build. See `sw/stage2_freertos_tasks/Readme.md`
-for the step-by-step for Vitis Classic and Unified. Don't copy `tests/` into
-the Vitis project.
+Written against 2025.2, which only has the Unified Vitis IDE (SDT flow).
+Older versions work too, but menu names differ.
+
+### 1. Hardware platform in Vivado
+
+Either run `hw/scripts/create_ps_platform.tcl` (see `hw/Readme.md`), or build it by hand:
+
+1. **Create Project** > name `zybo_ps_platform`, location `<repo>/hw/build` > **RTL Project**,
+   tick *Do not specify sources at this time*.
+2. Default Part > **Boards** tab > search `zybo` > pick your board (Zybo Z7-10, Z7-20 or the original Zybo) > Finish.
+3. Flow Navigator > **Create Block Design** > name `ps_system`.
+4. **+** (Add IP) > `ZYNQ7 Processing System`.
+5. Click **Run Block Automation** in the green banner > keep *Apply Board Preset* ticked > OK.
+6. Double-click the Zynq block:
+   - *PS-PL Configuration* > AXI Non Secure Enablement > GP Master AXI Interface > **untick M AXI GP0 interface**
+   - *MIO Configuration* > Application Processor Unit > **tick Timer 0** (IO: EMIO)
+   - check only, don't change: *I/O Peripherals* has UART 1 on MIO 48..49 and GPIO MIO ticked
+   - OK
+7. **Validate Design** (F6). It should report no errors.
+8. Sources > right-click `ps_system.bd` > **Create HDL Wrapper** > let Vivado manage it.
+9. Right-click `ps_system.bd` > **Generate Output Products** > Global > Generate.
+10. File > Export > **Export Hardware** > **Pre-synthesis** > save as
+    `<repo>/hw/export/zybo_ps_platform.xsa`. There is no bitstream: the PL is empty.
+
+### 2. Platform in Vitis
+
+1. Start Vitis 2025.2 and open a workspace folder, e.g. `<repo>/sw/workspace` (git-ignored).
+2. File > New Component > **Platform** > name `zybo_platform` > select the XSA >
+   Operating system **freertos**, processor **ps7_cortexa9_0** > Finish.
+3. Open the platform's settings (`vitis-comp.json`) > ps7_cortexa9_0 > freertos domain > Board Support Package:
+   - **freertos**: the defaults are fine. Check `freertos_use_mutexes` is on and
+     `freertos_check_for_stack_overflow` is 2.
+   - **xiltimer**: `XILTIMER_tick_timer` must **not** be `ps7_ttc_2` (the sample
+     timer). The default and the SCU timer are both fine.
+4. Select the platform in the FLOW panel > **Build**.
+
+### 3. Application in Vitis
+
+1. File > New Component > **Application** > name `sensor_app` > platform `zybo_platform` >
+   domain `freertos_ps7_cortexa9_0` > Finish.
+2. Copy every `.c` and `.h` from this stage's `src/` tree **flat** into the component's
+   `src/` folder. The Vitis app template only compiles sources directly in `src/`,
+   not in subfolders, and the quoted includes then resolve without any include
+   path settings:
+   ```powershell
+   Get-ChildItem "<repo>\sw\stage3_ringbuffer_sync\src" -Recurse -Include *.c,*.h |
+       Copy-Item -Destination "<workspace>\sensor_app\src" -Force
+   ```
+   Don't copy `tests/`.
+3. Select `sensor_app` > **Build**. It should finish without errors or warnings from these sources.
+
+### 4. Board and run
+
+1. Boot mode jumper **JP5 to JTAG**. Power select to USB (or plug in a 5 V supply).
+2. Micro-USB into the **PROG/UART** port, power switch on. Windows shows a
+   "USB Serial Port (COMx)" in Device Manager.
+3. Terminal on that COM port, **115200 8N1, no flow control** (Vitis > Serial
+   Monitor, PuTTY or Tera Term).
+4. Select `sensor_app` > **Run**. Vitis resets the board, runs ps7_init and
+   downloads the ELF. The banner should appear, then the checklist below applies.
+
+When something needs changing during bring-up, change it in the repository
+and copy it over again, so the repo stays the source of truth.
+
+In 2025.2 the Xilinx FreeRTOSConfig.h doesn't enable
+`INCLUDE_uxTaskGetStackHighWaterMark`, so the `stack headroom` line in `d` is
+left out. That's expected.
 
 ## Terminal interface
 
@@ -346,6 +417,11 @@ Robustness carried over from stage 2
 | Symptom | Likely cause |
 |---------|--------------|
 | `#error sensor_log needs configUSE_MUTEXES = 1` | enable mutexes in the FreeRTOS BSP settings |
+| Build error on `XPAR_XTTCPS_2_*` | TTC0 not enabled in the XSA - tick Timer 0 in the Zynq block, re-export, update the platform |
+| Undefined references to functions in `app/` or `drivers/` files | sources were copied into subfolders - the Vitis app template only builds `src/*.c`, copy them flat |
+| `FATAL: sample timer init failed, code 2` | TTC instance not found - same XSA problem as above |
+| `FATAL: sample timer init failed, code 6` | counter already running - xiltimer tick_timer is set to `ps7_ttc_2`, change it |
+| Nothing after "scheduler running", LD4 not blinking, WARN line after 1 s | timer interrupt not arriving - check the XSA has TTC0 and the platform was rebuilt |
 | `FATAL: sensor log init failed, code 1` | log storage outside DDR - the linker script was changed to put .bss elsewhere |
 | `FATAL: sensor log init failed, code 3` | no heap left for the mutex - increase the BSP heap size |
 | `FATAL: consumer task/queue create failed` | no heap left for the queue or the task |
