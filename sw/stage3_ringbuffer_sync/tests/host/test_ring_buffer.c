@@ -3,8 +3,8 @@
  *
  * Host-side unit tests for ring_buffer.c. No target, no RTOS, any C11 compiler:
  *
- *   gcc -std=c11 -Wall -Wextra -Werror -I../../src/app -I../../src/drivers \
- *       test_ring_buffer.c ../../src/app/ring_buffer.c -o test_ring_buffer
+ *   gcc -std=c11 -Wall -Wextra -Werror -I../../src/datalog -I../../src/drivers \
+ *       test_ring_buffer.c ../../src/datalog/ring_buffer.c -o test_ring_buffer
  *   ./test_ring_buffer
  *
  * Exit code 0 means every check passed.
