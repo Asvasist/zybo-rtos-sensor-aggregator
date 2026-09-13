@@ -65,9 +65,9 @@
  *
  * Button pull-ups: the original Zybo preset disables the Zynq's internal
  * pull-up on MIO50/51 so the board's pull-down resistors set the idle level.
- * The Zybo Z7 preset leaves them at Vivado's default (enabled), and the
- * buttons then read as permanently pressed. gpio_drv_init() therefore
- * applies BOARD_MIO_BTN_PULLUP itself, whatever the XSA says.
+ * The Zybo Z7 preset leaves them at Vivado's default (enabled) - on the first
+ * Z7-20 run both buttons then read as permanently pressed. gpio_drv_init()
+ * therefore applies BOARD_MIO_BTN_PULLUP itself, whatever the XSA says.
  *
  * To be confirmed on the Z7 during stage 4 bring-up (press = 1, release = 0).
  * If a Z7 revision turns out to wire them active low instead, set
@@ -84,13 +84,13 @@
  *
  * TTC0 counter 2 (ps7_ttc_2), GIC ID 44, level sensitive.
  *
- * Originally counter 1. That collides with the SDT flow (Vitis 2023.2 and
+ * Stage 2 used counter 1. That collides with the SDT flow (Vitis 2023.2 and
  * later): for a FreeRTOS BSP, xiltimer always enables a tick timer, and with
- * TTC0 in the design its default pick can be the middle TTC instance,
- * ps7_ttc_1. Counter 0 can end up as the sleep timer in some configurations.
- * Counter 2 is claimed by neither default. sample_timer_init() refuses a
- * counter that is already running, so a clash still fails loudly rather
- * than killing the RTOS tick.
+ * TTC0 in the design its default pick is the middle TTC instance, ps7_ttc_1.
+ * Counter 0 can end up as the sleep timer in some configurations. Counter 2
+ * is claimed by neither default. sample_timer_init() refuses a counter that
+ * is already running, so a clash still fails loudly rather than killing the
+ * RTOS tick.
  *
  * Only the classic flow uses the plain GIC ID below. The SDT flow takes the
  * encoded interrupt ID from the TTC config table instead - see sample_timer.c.
@@ -98,5 +98,17 @@
  * TTC0 has to be enabled in the PS configuration - hw/scripts does that.
  * ------------------------------------------------------------------------- */
 #define BOARD_SAMPLE_TTC_IRQ        XPS_TTC0_2_INT_ID
+
+/* -------------------------------------------------------------------------
+ * Memory map
+ *
+ * DDR as the Cortex-A9s see it (UG585, system address map): at most
+ * 0x0010_0000 to 0x3FFF_FFFF. The Zybo's 512 MB and the Zybo Z7's 1 GB both
+ * sit inside that window; the bottom megabyte is left out because OCM can be
+ * mapped there. Only used as a sanity check that the sensor log really did
+ * get linked into DDR.
+ * ------------------------------------------------------------------------- */
+#define BOARD_DDR_BASE_ADDR         0x00100000UL
+#define BOARD_DDR_HIGH_ADDR         0x3FFFFFFFUL
 
 #endif /* BOARD_ZYBO_H */

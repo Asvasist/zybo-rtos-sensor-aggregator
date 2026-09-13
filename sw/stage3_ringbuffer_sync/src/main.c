@@ -1,17 +1,21 @@
 /*
- * main.c - Stage 2: FreeRTOS task architecture.
+ * main.c - Stage 3: ring buffer in DDR, mutex protection, message queue.
  *
- * Brings the peripherals up while still single-threaded, creates the three
- * application tasks and hands over to the scheduler.
+ * Brings the peripherals and the shared objects up while still
+ * single-threaded, creates the three application tasks and hands over to
+ * the scheduler.
  *
- *   producer  highest  woken by TTC0 every 100 ms, reads the XADC, posts the
- *                      sample to the mailbox
+ *   producer  highest  woken by TTC0 every 100 ms, reads the XADC, writes
+ *                      the sample into the sensor log
  *   ui        middle   10 ms button scan and terminal key input
- *   consumer  lowest   formats samples and command output, only UART writer
+ *   consumer  lowest   drains the log, formats output, console gatekeeper
  *
- *   TTC0 IRQ --notify--> producer --mailbox + notify--> consumer --> UART TX
- *                                                          ^
- *   BTN4/BTN5, UART RX --> ui --------- notify ------------+
+ *   TTC0 IRQ --notify--> producer --write--> [ sensor log: ring buffer in DDR ]
+ *                           |                [ guarded by a mutex             ]
+ *                           |                               | read (batches)
+ *                           +-- DATA_READY --+              v
+ *                                            +--> queue --> consumer --> UART TX
+ *   BTN4/BTN5, UART RX --> ui --- commands --+
  *
  * Console: 115200 8N1 on the PROG/UART micro-USB port, 'h' for commands.
  */
@@ -25,6 +29,7 @@
 #include "console.h"
 #include "fault.h"
 #include "gpio_drv.h"
+#include "sensor_log.h"
 #include "task_consumer.h"
 #include "task_producer.h"
 #include "task_ui.h"
@@ -41,10 +46,19 @@ _Static_assert(pdMS_TO_TICKS(APP_UI_SCAN_PERIOD_MS) > 0U,
                "RTOS tick rate too low for the UI scan period");
 _Static_assert(pdMS_TO_TICKS(APP_SAMPLE_TIMEOUT_MS) > pdMS_TO_TICKS(1000U / APP_SAMPLE_RATE_HZ),
                "sample timeout must be longer than the sample period");
+_Static_assert((APP_LOG_CAPACITY != 0U) && ((APP_LOG_CAPACITY & (APP_LOG_CAPACITY - 1U)) == 0U),
+               "APP_LOG_CAPACITY must be a power of two");
+_Static_assert((APP_LOG_READ_BATCH > 0U) && (APP_LOG_READ_BATCH <= APP_LOG_CAPACITY),
+               "APP_LOG_READ_BATCH out of range");
+_Static_assert((2U * APP_LOG_WRITE_WAIT_MS) < (1000U / APP_SAMPLE_RATE_HZ),
+               "producer's mutex wait must stay well inside one sample period");
 
 int main(void)
 {
-    int32_t status;
+    uintptr_t log_base;
+    uint32_t  log_bytes;
+    uint32_t  log_capacity;
+    int32_t   status;
 
     /*
      * GPIO first so a failure in anything after it can at least be shown on
@@ -72,10 +86,14 @@ int main(void)
     }
 
     console_write("\n\n"
-                  "==================================================\n"
-                  " Zybo sensor aggregator - stage 2, FreeRTOS tasks\n");
+                  "========================================================\n"
+                  " Zybo sensor aggregator - stage 3, log + mutex + queue\n");
     console_printf(" fw %s, built %s %s\n", APP_FW_VERSION, __DATE__, __TIME__);
-    console_write("==================================================\n");
+    console_write("========================================================\n");
+
+#if (APP_TEST_LOG_HOLD_US > 0U)
+    console_printf("*** TEST BUILD: log mutex held an extra %u us on every read ***\n", APP_TEST_LOG_HOLD_US);
+#endif
 
     status = (int32_t)xadc_drv_init();
     if (status != (int32_t)XADC_DRV_OK)
@@ -84,6 +102,15 @@ int main(void)
     }
     console_write("XADC up: continuous sequencer, 16x averaging, calibration on\n");
 
+    status = (int32_t)sensor_log_init();
+    if (status != (int32_t)SENSOR_LOG_OK)
+    {
+        fault_halt("sensor log init", status);
+    }
+    sensor_log_storage_info(&log_base, &log_bytes, &log_capacity);
+    console_printf("sensor log: %lu records, %lu bytes at 0x%08lX (DDR)\n",
+                   (unsigned long)log_capacity, (unsigned long)log_bytes, (unsigned long)log_base);
+
     /*
      * Nothing runs until vTaskStartScheduler(), so creation order doesn't
      * matter for correctness. The sample timer is deliberately not started
@@ -91,7 +118,7 @@ int main(void)
      */
     if (!task_consumer_create())
     {
-        fault_halt("consumer task create", 0);
+        fault_halt("consumer task/queue create", 0);
     }
 
     if (!task_ui_create())

@@ -19,7 +19,12 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+/* XTime_GetTime(): xtime_l.h in the classic BSP, the xiltimer library in the SDT flow. */
+#ifdef SDT
+#include "xiltimer.h"
+#else
 #include "xtime_l.h"
+#endif
 #include "sleep.h"
 
 #include "board_zybo.h"
@@ -47,16 +52,17 @@
 static bool s_stream_enabled = true;
 
 /*
- * Milliseconds since boot from the Cortex-A9 global timer, which the BSP
- * starts in its C runtime startup. Wraps after ~49 days; every comparison
- * below uses unsigned subtraction so the wrap is harmless.
+ * Milliseconds since boot from the Cortex-A9 global timer. Wraps after ~49
+ * days; every comparison below uses unsigned subtraction so the wrap is
+ * harmless. The extra parentheses matter: xiltimer defines COUNTS_PER_SECOND
+ * as "XPAR_CPU_CORE_CLOCK_FREQ_HZ/2" with none of its own.
  */
 static uint32_t app_uptime_ms(void)
 {
     XTime now_ticks;
 
     XTime_GetTime(&now_ticks);
-    return (uint32_t)(now_ticks / (COUNTS_PER_SECOND / 1000U));
+    return (uint32_t)(now_ticks / ((COUNTS_PER_SECOND) / 1000U));
 }
 
 static bool app_period_elapsed(uint32_t *last_ms, uint32_t period_ms, uint32_t now_ms)
@@ -258,6 +264,14 @@ int main(void)
     {
         app_fatal("UART init", status);
     }
+
+    /*
+     * Make sure the global timer is counting before the loop relies on it.
+     * The classic BSP starts it in its C startup code; the SDT xiltimer
+     * library only starts it on the first sleep call. A 1 us sleep covers
+     * both and doesn't depend on some driver happening to sleep first.
+     */
+    usleep(1U);
 
     console_write("\n\n"
                   "==================================================\n"

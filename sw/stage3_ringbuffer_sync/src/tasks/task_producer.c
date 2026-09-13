@@ -9,9 +9,20 @@
 #include "fault.h"
 #include "gpio_drv.h"
 #include "sample_timer.h"
-#include "sensor_mailbox.h"
+#include "sensor_log.h"
+#include "sensor_record.h"
 #include "task_consumer.h"
 #include "uptime.h"
+
+/* What happened in one pass of the producer loop, for the statistics. */
+typedef struct
+{
+    uint32_t read_time_us;
+    uint32_t write_time_us;
+    uint32_t missed_ticks;
+    bool     write_dropped;
+    bool     doorbell_failed;
+} producer_cycle_t;
 
 static TaskHandle_t     s_producer_handle;
 
@@ -53,18 +64,30 @@ static uint8_t producer_read_buttons(void)
 }
 
 static void producer_update_stats(const sensor_record_t *record, uint64_t prev_capture_us,
-                                  uint32_t read_time_us, uint32_t missed_ticks)
+                                  const producer_cycle_t *cycle)
 {
     uint32_t sensor;
 
     taskENTER_CRITICAL();
 
     s_stats.samples++;
-    s_stats.overruns += missed_ticks;
+    s_stats.overruns += cycle->missed_ticks;
 
-    if (read_time_us > s_stats.read_time_max_us)
+    if (cycle->read_time_us > s_stats.read_time_max_us)
     {
-        s_stats.read_time_max_us = read_time_us;
+        s_stats.read_time_max_us = cycle->read_time_us;
+    }
+    if (cycle->write_time_us > s_stats.log_write_max_us)
+    {
+        s_stats.log_write_max_us = cycle->write_time_us;
+    }
+    if (cycle->write_dropped)
+    {
+        s_stats.log_write_drops++;
+    }
+    if (cycle->doorbell_failed)
+    {
+        s_stats.doorbell_retries++;
     }
 
     if (prev_capture_us != 0U)
@@ -109,10 +132,14 @@ static void producer_update_stats(const sensor_record_t *record, uint64_t prev_c
 static void producer_task(void *task_arg)
 {
     const TickType_t tick_wait_timeout = pdMS_TO_TICKS(APP_SAMPLE_TIMEOUT_MS);
+    const TickType_t log_write_wait    = pdMS_TO_TICKS(APP_LOG_WRITE_WAIT_MS);
     sensor_record_t  record;
-    uint64_t         prev_capture_us = 0U;
+    producer_cycle_t cycle;
+    uint64_t         prev_capture_us  = 0U;
+    uint64_t         write_start_us;
     uint32_t         pending_ticks;
-    uint32_t         read_time_us;
+    bool             log_was_empty    = false;
+    bool             doorbell_pending = false;
     int32_t          status;
 
     (void)task_arg;
@@ -153,13 +180,32 @@ static void producer_task(void *task_arg)
         record.capture_us = uptime_us();
         xadc_drv_read_all(&record.sensors);
         record.buttons = producer_read_buttons();
+
+        /* Incremented even if the write below fails, so a dropped sample leaves a visible gap. */
         record.seq++;
 
-        sensor_mailbox_post(&record);
-        task_consumer_post_event(CONSUMER_EVT_SAMPLE);
+        write_start_us = uptime_us();
+        cycle.write_dropped = !sensor_log_write(&record, log_write_wait, &log_was_empty);
+        cycle.write_time_us = (uint32_t)(uptime_us() - write_start_us);
 
-        read_time_us = (uint32_t)(uptime_us() - record.capture_us);
-        producer_update_stats(&record, prev_capture_us, read_time_us, pending_ticks - 1U);
+        cycle.doorbell_failed = false;
+        if ((!cycle.write_dropped) && (log_was_empty || doorbell_pending))
+        {
+            /*
+             * Ring only on the empty -> non-empty edge. While the log holds
+             * data the consumer is either draining it or deliberately paused,
+             * and one message per sample would just fill its queue and crowd
+             * out UI commands. If the queue happens to be full, try again
+             * with the next sample.
+             */
+            doorbell_pending      = !task_consumer_send(CONSUMER_MSG_DATA_READY, '\0');
+            cycle.doorbell_failed = doorbell_pending;
+        }
+
+        cycle.read_time_us = (uint32_t)(write_start_us - record.capture_us);
+        cycle.missed_ticks = pending_ticks - 1U;
+        producer_update_stats(&record, prev_capture_us, &cycle);
+
         prev_capture_us = record.capture_us;
     }
 }
@@ -182,6 +228,12 @@ void task_producer_get_stats(producer_stats_t *stats_out)
     taskENTER_CRITICAL();
     *stats_out = s_stats;
     taskEXIT_CRITICAL();
+}
+
+uint32_t task_producer_sample_count(void)
+{
+    /* A single 32-bit read is atomic on this core; only the producer writes it. */
+    return s_stats.samples;
 }
 
 TaskHandle_t task_producer_handle(void)

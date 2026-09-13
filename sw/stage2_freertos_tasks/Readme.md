@@ -14,7 +14,7 @@ reports, falling behind, or being stalled on purpose).
 ## What changed from stage 1
 
 - The super-loop is gone. There are now three tasks: producer, UI and consumer.
-- New `sample_timer` driver: TTC0 counter 1 in interval mode, interrupt at 10 Hz.
+- New `sample_timer` driver: TTC0 counter 2 in interval mode, interrupt at 10 Hz.
 - New `sensor_mailbox`: a single slot that carries the newest sample from the producer to the consumer.
 - New `fault` module: init failures and RTOS hooks all end in the same place.
 - The drivers came over from stage 1 with small changes (the first commit on this branch is a verbatim copy, so `git diff` shows exactly what changed):
@@ -33,8 +33,8 @@ reports, falling behind, or being stalled on purpose).
 | consumer | idle + 1 | 1024 words | notification bits | UART TX, LD4 |
 
 ```
-                 IRQ 43
-  TTC0 counter 1 ------> sample_timer_isr()
+                 IRQ 44
+  TTC0 counter 2 ------> sample_timer_isr()
                                 |
                                 | xTaskNotifyGiveFromISR()
                                 v
@@ -63,7 +63,7 @@ reports, falling behind, or being stalled on purpose).
 
 ### Life of one sample
 
-1. TTC0 counter 1 reaches its match value and raises IRQ 43.
+1. TTC0 counter 2 reaches its match value and raises IRQ 44.
 2. `sample_timer_isr()` reads (and so clears) the TTC status, then calls the
    producer's callback. The callback calls `xTaskNotifyGiveFromISR()` and
    `portYIELD_FROM_ISR()`, so the port switches straight to the producer on IRQ
@@ -81,7 +81,7 @@ reports, falling behind, or being stalled on purpose).
 divider on a crystal-derived clock, not from the RTOS tick, so it doesn't
 change with `configTICK_RATE_HZ`. The ISR also wakes the producer the moment
 the period expires rather than at the next tick boundary. The integer divider
-gives 99998 us instead of exactly 100 ms. `d` shows the real period.
+can make it differ slightly from exactly 100 ms; `d` shows the real period (100000 us on the Zybo Z7).
 
 **Why the ISR only notifies.** Reading the XADC takes several command/response
 exchanges over the XADCIF FIFOs. Doing that in IRQ context would keep
@@ -196,6 +196,27 @@ src/
     console.*             printf over UART (from stage 1)
 ```
 
+## Fixes from the first board bring-up (Vitis 2025.2)
+
+These were found while bringing up stage 3 on a Zybo Z7-20 with Vivado and
+Vitis 2025.2 (SDT flow). The same code lives in this stage, so the fixes were
+carried back here. This stage builds and links cleanly against that FreeRTOS
+platform; a run on the board is still to do.
+
+- `XUartPsFormat` and `vTaskNotifyGiveFromISR()`: the names used before didn't
+  exist in the real driver and kernel headers.
+- **Zero timestamps.** The SDT xiltimer library only starts the Cortex-A9
+  global timer on the first sleep call. `uptime_init()` now starts it at boot.
+- **Buttons stuck at 1.** The Z7 preset enables the MIO50/51 internal pull-ups.
+  The firmware now sets the pad pull-up itself (`board_zybo.h`).
+- **Sample timer moved to TTC0 counter 2.** In the SDT flow the interrupt ID
+  comes from the TTC config table, and a counter that is already running is
+  refused rather than taken over.
+- XADC lookup in the SDT flow by base address 0 ("first instance").
+
+The full Vivado and Vitis 2025.2 walkthrough is in
+`sw/stage3_ringbuffer_sync/Readme.md`, and it applies to this stage unchanged.
+
 ## Build and run
 
 ### 1. Hardware platform
@@ -262,7 +283,7 @@ Expected startup and stream (sensor values vary from board to board):
 ==================================================
 XADC up: continuous sequencer, 16x averaging, calibration on
 tasks created, starting scheduler
-scheduler running, sample period 99998 us
+scheduler running, sample period 100000 us
 
 Commands:
   r / BTN4   full sensor report (latest sample + min/max)
@@ -283,7 +304,7 @@ Diagnostics layout (fill in the real numbers during bring-up):
 ```
 Diagnostics
   uptime          : 42.731 s
-  sample period   : 99998 us (timer)
+  sample period   : 100000 us (timer)
   producer        : 422 samples, 0 overruns, 0 timeouts
   sample interval : min <n> us, max <n> us
   XADC read time  : max <n> us
@@ -322,11 +343,13 @@ Deliberate failures (revert each one afterwards)
 
 | Symptom | Likely cause |
 |---------|--------------|
-| Build error on `XPAR_XTTCPS_1_*` | TTC0 not enabled in the XSA - regenerate it with the current script |
+| Build error on `XPAR_XTTCPS_2_*` | TTC0 not enabled in the XSA - regenerate it with the current script |
 | Link error: multiple definition of `vApplicationStackOverflowHook` | this BSP version doesn't define its hooks weak - remove `app/rtos_hooks.c` |
 | Link error: undefined `xPortGetFreeHeapSize` | heap_3 selected in the BSP - switch to heap_4 |
 | `FATAL: sample timer init failed, code 5` | interrupt handler couldn't be installed on the GIC |
-| No stream, `WARN: no sample for 1000 ms` | TTC not counting or IRQ not reaching the GIC - check IRQ 43 and TTC0 in the XSA |
+| `FATAL: sample timer init failed, code 6` | counter already running - xiltimer tick_timer is set to `ps7_ttc_2`, change it |
+| Undefined references at link time | Vitis 2025.2 only builds `src/*.c` - copy the sources into `src/` flat, not in subfolders |
+| No stream, `WARN: no sample for 1000 ms` | TTC not counting or IRQ not reaching the GIC - check IRQ 44 and TTC0 in the XSA |
 | Garbage or data abort soon after "starting scheduler" | a task missing `portTASK_USES_FLOATING_POINT()`, or a stack too small |
 
 ## Known limitations (on purpose, handled in later stages)
