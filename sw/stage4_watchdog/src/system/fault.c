@@ -9,11 +9,9 @@
 #include "gpio_drv.h"
 #include "uart_drv.h"
 #include "uptime.h"
+#include "wdt_drv.h"
 
 #define FAULT_BLINK_HALF_PERIOD_US  100000U
-
-/* "-2147483648" plus terminator */
-#define FAULT_INT_STR_LEN           12U
 
 static void fault_busy_wait_us(uint32_t delay_us)
 {
@@ -26,37 +24,21 @@ static void fault_busy_wait_us(uint32_t delay_us)
     }
 }
 
-/* printf is off limits here, so a minimal decimal conversion. */
-static void fault_write_int(int32_t value)
-{
-    char     digits[FAULT_INT_STR_LEN];
-    char    *cursor = &digits[FAULT_INT_STR_LEN - 1U];
-    uint32_t magnitude;
-
-    /* written this way so INT32_MIN doesn't overflow on negation */
-    magnitude = (value < 0) ? ((uint32_t)(-(value + 1)) + 1U) : (uint32_t)value;
-
-    *cursor = '\0';
-    do
-    {
-        cursor--;
-        *cursor = (char)('0' + (magnitude % 10U));
-        magnitude /= 10U;
-    } while (magnitude != 0U);
-
-    if (value < 0)
-    {
-        cursor--;
-        *cursor = '-';
-    }
-
-    console_write(cursor);
-}
-
 static void fault_park(void) __attribute__((noreturn));
 static void fault_park(void)
 {
-    console_write("\nsystem halted\n");
+    /*
+     * With interrupts masked the watchdog supervisor never runs again, so a
+     * running SWDT turns this halt into a board reset within its timeout.
+     */
+    if (wdt_drv_is_running())
+    {
+        console_write("\nwaiting for the watchdog to reset the board\n");
+    }
+    else
+    {
+        console_write("\nsystem halted\n");
+    }
     uart_drv_wait_tx_idle();
 
     /* The fault may predate uptime_init() in main(); the blink timing needs the timer running. */
@@ -76,7 +58,12 @@ void fault_halt(const char *what, int32_t code)
     console_write("\n\nFATAL: ");
     console_write(what);
     console_write(" failed, code ");
-    fault_write_int(code);
+    if (code < 0)
+    {
+        console_write("-");
+    }
+    /* written this way so INT32_MIN doesn't overflow on negation */
+    console_write_dec((code < 0) ? ((uint32_t)(-(code + 1)) + 1U) : (uint32_t)code);
 
     fault_park();
 }

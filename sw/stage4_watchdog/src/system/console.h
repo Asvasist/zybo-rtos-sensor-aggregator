@@ -19,6 +19,9 @@
 
 void console_write(const char *text);
 
+/* Unsigned decimal without printf or the shared buffer - usable from the fault and watchdog paths. */
+void console_write_dec(uint32_t value);
+
 void console_printf(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 
 /*

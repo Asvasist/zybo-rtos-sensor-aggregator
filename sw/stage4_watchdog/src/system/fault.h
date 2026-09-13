@@ -10,7 +10,8 @@
  * so once in here nothing else runs. The message may land in the middle of a
  * half-printed telemetry line, hence the leading newlines.
  *
- * Stage 4 changes the ending from "halt" to "let the watchdog reset the board".
+ * Once the SWDT is running, nothing kicks it after a fault, so the halt ends
+ * in a board reset a watchdog timeout later.
  */
 #ifndef FAULT_H
 #define FAULT_H

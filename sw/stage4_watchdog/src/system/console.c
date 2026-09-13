@@ -33,6 +33,22 @@ void console_write(const char *text)
     }
 }
 
+void console_write_dec(uint32_t value)
+{
+    char  digits[11];   /* "4294967295" + NUL */
+    char *cursor = &digits[sizeof(digits) - 1U];
+
+    *cursor = '\0';
+    do
+    {
+        cursor--;
+        *cursor = (char)('0' + (value % 10U));
+        value /= 10U;
+    } while (value != 0U);
+
+    console_write(cursor);
+}
+
 void console_printf(const char *fmt, ...)
 {
     va_list args;
