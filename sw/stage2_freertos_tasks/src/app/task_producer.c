@@ -30,7 +30,7 @@ static void producer_timer_tick_cb(void *cb_ctx)
      * the producer is still busy with the previous one isn't lost, it shows
      * up as a count above one and gets reported as an overrun.
      */
-    xTaskNotifyGiveFromISR(s_producer_handle, &higher_prio_task_woken);
+    vTaskNotifyGiveFromISR(s_producer_handle, &higher_prio_task_woken);
 
     /* Switch straight to the producer on IRQ exit rather than on the next tick. */
     portYIELD_FROM_ISR(higher_prio_task_woken);

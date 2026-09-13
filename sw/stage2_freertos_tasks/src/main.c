@@ -29,6 +29,7 @@
 #include "task_producer.h"
 #include "task_ui.h"
 #include "uart_drv.h"
+#include "uptime.h"
 #include "xadc_drv.h"
 
 /* Catch configuration mistakes at build time instead of as odd behaviour on the board. */
@@ -62,6 +63,12 @@ int main(void)
     if (status != (int32_t)UART_DRV_OK)
     {
         fault_halt("UART init", status);
+    }
+
+    /* Before anything takes a timestamp - see uptime.c for why this isn't automatic. */
+    if (!uptime_init())
+    {
+        fault_halt("uptime (global timer) init", 0);
     }
 
     console_write("\n\n"

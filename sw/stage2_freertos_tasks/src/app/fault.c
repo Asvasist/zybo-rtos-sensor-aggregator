@@ -59,6 +59,9 @@ static void fault_park(void)
     console_write("\nsystem halted\n");
     uart_drv_wait_tx_idle();
 
+    /* The fault may predate uptime_init() in main(); the blink timing needs the timer running. */
+    (void)uptime_init();
+
     for (;;)
     {
         gpio_drv_led_toggle();

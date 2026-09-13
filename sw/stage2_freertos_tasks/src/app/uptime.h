@@ -11,7 +11,15 @@
 #ifndef UPTIME_H
 #define UPTIME_H
 
+#include <stdbool.h>
 #include <stdint.h>
+
+/*
+ * Makes sure the global timer is counting. Call once from main() before the
+ * first timestamp is taken; calling it again later is harmless.
+ * Returns false if the timer still isn't advancing afterwards.
+ */
+bool uptime_init(void);
 
 uint64_t uptime_us(void);
 
