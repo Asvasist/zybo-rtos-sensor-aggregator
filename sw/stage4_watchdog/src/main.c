@@ -61,6 +61,11 @@ _Static_assert((2U * APP_LOG_WRITE_WAIT_MS) < (1000U / APP_SAMPLE_RATE_HZ),
                "producer's mutex wait must stay well inside one sample period");
 _Static_assert((2U * APP_WDT_CHECK_PERIOD_MS) < APP_WDT_TIMEOUT_MS,
                "the supervisor must get at least two chances to kick per SWDT timeout");
+_Static_assert((APP_WDT_LIMIT_PRODUCER_MS >= (2U * APP_WDT_CHECK_PERIOD_MS)) &&
+               (APP_WDT_LIMIT_UI_MS >= (2U * APP_WDT_CHECK_PERIOD_MS)),
+               "a check-in limit shorter than two supervisor periods can trip on timing alone");
+_Static_assert(APP_WDT_LIMIT_CONSUMER_MS > (4U * APP_CONSUMER_POLL_MS),
+               "the consumer limit has to cover its queue poll plus a long print");
 
 int main(void)
 {
