@@ -1,53 +1,62 @@
 # Zybo RTOS Sensor Aggregator
 
 A FreeRTOS sensor logger on the Digilent Zybo (Zynq-7000). A high-priority
-task samples the Zynq's on-chip XADC (die temperature and supply rails) plus
-the board's PS push buttons on a hardware timer tick, stores the samples in a
-mutex-protected ring buffer in DDR, and a low-priority task formats and logs
-them over UART. A hardware watchdog resets the board if any task stops making
-progress. The slide switches and PL buttons follow with the PL design.
+task samples the Zynq's on-chip XADC (die temperature and supply rails) and
+the board's PS push buttons on a hardware timer tick. It stores the samples in
+a mutex-protected ring buffer in DDR, and a low-priority task formats them and
+prints them over UART. A hardware watchdog resets the board if any task stops
+making progress.
 
-What it exercises:
+The slide switches and the PL buttons come later, with the PL design.
 
-- task priorities, mutexes, queues, ISR-to-task signalling
-- a ring buffer in DDR that a fast producer and slow consumer share safely
-- hardware-timer driven sampling and the Zynq system watchdog (SWDT)
+What it covers:
 
-## Plan
+- task priorities, mutexes, queues, getting from an ISR to a task
+- a ring buffer in DDR that a fast producer and a slow consumer share safely
+- sampling paced by a hardware timer, and the Zynq system watchdog (SWDT)
 
-Firmware first, entirely on the PS. The PL design comes last, once the software is done.
+## Stages
+
+Firmware first, entirely on the PS. The PL design comes after.
 
 | Stage | Scope | Folder | Status |
 |-------|-------|--------|--------|
 | 1 | Bare-metal drivers: UART, MIO GPIO, XADC; temperature on the terminal | `sw/stage1_baremetal_drivers` | Code complete, builds against the 2025.2 BSP, board run pending |
 | 2 | FreeRTOS: timer-paced producer (100 ms XADC), consumer printing over UART | `sw/stage2_freertos_tasks` | Code complete, builds against the 2025.2 BSP, board run pending |
 | 3 | Ring buffer in DDR, mutex protection, queue between tasks | `sw/stage3_ringbuffer_sync` | First board run on a Zybo Z7-20 done, its two defects fixed, re-run pending |
-| 4 | Zynq system watchdog, supervisor task with per-task check-ins, reset cause | `sw/stage4_watchdog` | Code complete, builds against the 2025.2 BSP, board run pending |
-| 5 | PL design: AXI GPIO for SW0-3 / BTN0-3, full hardware platform | `hw/` | Later |
+| 4 | Zynq system watchdog, supervisor task with per-task check-ins, reset cause | `sw/stage4_watchdog` | Code complete, built end to end with Vivado/Vitis 2025.2, board run pending |
+| 5 | PL design: AXI GPIO for SW0-3 / BTN0-3 | `hw/` | Later |
 
-Stage 4 is the complete firmware - it contains everything from the earlier
-stages. Each stage has its own Readme with design notes, build steps and a
-bring-up checklist; the stage 3 Readme has the full Vivado/Vitis 2025.2
-walkthrough, the stage 4 Readme adds the watchdog and SD boot parts.
+Stage 4 is the complete firmware - everything from the earlier stages is in
+it. The earlier stage folders are kept as they were, so each step can still be
+built and read on its own.
+
+Each stage has its own Readme. The stage 3 Readme has the full Vivado/Vitis
+2025.2 walkthrough; the stage 4 Readme adds the watchdog, updating an existing
+platform, and booting from SD.
 
 ## Quick start
 
-1. Build the XSA: `hw/scripts/create_ps_platform.tcl` (see `hw/Readme.md`).
-2. In Vitis 2025.2 create a FreeRTOS platform from it and an empty application
-   (stage 3 Readme, *Running on the board*).
-3. Copy `sw/stage4_watchdog/src` into the application's `src/` flat, build, run.
-   Terminal at 115200 8N1, `h` for the commands.
+1. **XSA.** From the `hw` folder:
+   `vivado -mode batch -source scripts/create_ps_platform.tcl -tclargs zybo-z7-20`.
+   Or build it by hand - see the stage 4 Readme, *Hardware: enabling the watchdog*.
+2. **Vitis 2025.2.** Create a FreeRTOS platform for `ps7_cortexa9_0` from
+   `hw/export/zybo_ps_platform.xsa`, then an empty application on it (stage 3
+   Readme, *Running on the board*).
+3. **Sources.** Copy every `.c`/`.h` from `sw/stage4_watchdog/src` flat into the
+   application's `src/` folder, build, and run. Terminal at 115200 8N1, `h` for
+   the commands.
 
 ## Repository layout
 
 ```
 hw/
-  Readme.md                      hardware platform notes
+  Readme.md                      what the platform contains and why
   scripts/create_ps_platform.tcl PS-only Vivado project + XSA export
 sw/
   stage1_baremetal_drivers/
     Readme.md
-    src/                         application sources (drop into a Vitis app)
+    src/                         bare-metal application sources
   stage2_freertos_tasks/
     Readme.md
     src/                         FreeRTOS application sources
@@ -56,10 +65,10 @@ sw/
     src/                         same layout as stage 4, without the watchdog
     tests/host/                  unit tests that run on a PC
   stage4_watchdog/
-    Readme.md                    watchdog design, SD boot, tests
+    Readme.md                    watchdog, updating the platform, SD boot, tests
     src/
       main.c
-      config/                    board map, application tuning
+      config/                    board map, application settings
       drivers/                   UART, GPIO, XADC, TTC sample timer, SWDT, SLCR
       system/                    console, uptime, reset cause, fault handling, RTOS hooks
       datalog/                   sample record, ring buffer, sensor log
@@ -68,28 +77,27 @@ sw/
     boot/boot.bif                SD card boot image (FSBL + application)
 ```
 
-Vitis 2025.2 only compiles sources sitting directly in an application's
-`src/` folder, so a stage's sources are copied in flat. The walkthrough in
-the stage 3 Readme shows how.
+Vitis 2025.2 only compiles sources that sit directly in an application's
+`src/` folder, so a stage's sources are copied in flat. The folders are for
+reading the code; the includes are by file name, so flattening doesn't break
+anything.
 
-Each stage is a complete, self-contained application source tree, so any
-stage can be built and run on its own. Drivers are carried forward from the
-previous stage and changed in place; the commit history shows exactly what
-changed and why.
+Drivers are carried forward from one stage to the next and changed in place.
+The commit history shows what changed and why.
 
-Build outputs (Vivado project, XSA, Vitis workspace) are not tracked - they
-are regenerated from the scripts and sources.
+Build outputs aren't tracked (Vivado project, XSA, Vitis workspace,
+`BOOT.BIN`); they're regenerated from the scripts and sources.
 
 ## Hardware and tools
 
-- Digilent Zybo, Zybo Z7-10 or Zybo Z7-20
+- Digilent Zybo, Zybo Z7-10 or Zybo Z7-20 (brought up on a Z7-20)
 - Micro-USB cable on the PROG/UART port, serial terminal at 115200 8N1
-- Vivado + Vitis (classic or Unified IDE; the sources handle both BSP flows).
-  Brought up with 2025.2 on a Zybo Z7-20.
-- Digilent board files installed in Vivado
+- microSD card for the watchdog reboot test (optional)
+- Vivado + Vitis 2025.2, with the Digilent board files. The sources still
+  compile for the older classic Vitis flow, but that isn't tested on a board.
 
 ## References
 
-- UG585 - Zynq-7000 SoC Technical Reference Manual (UART, GPIO, XADC interface, SWDT)
+- UG585 - Zynq-7000 SoC Technical Reference Manual (UART, GPIO, XADC interface, TTC, SWDT, SLCR)
 - UG480 - 7 Series FPGAs and Zynq-7000 SoC XADC User Guide
 - Zybo / Zybo Z7 reference manuals (Digilent)

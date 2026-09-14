@@ -25,7 +25,6 @@ build/
 
 # ---- boot images ----
 BOOT.BIN
-*.bin
 
 # ---- host unit test binaries ----
 sw/*/tests/host/test_*
