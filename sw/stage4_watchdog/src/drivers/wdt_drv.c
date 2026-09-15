@@ -47,6 +47,11 @@ wdt_drv_status_t wdt_drv_init(uint32_t timeout_ms)
 
     s_wdt_ready = false;
 
+    if (timeout_ms == 0U)
+    {
+        return WDT_DRV_ERR_RANGE;
+    }
+
     wdt_cfg = XWdtPs_LookupConfig(BOARD_WDT_ID);
     if (wdt_cfg == NULL)
     {
@@ -64,6 +69,11 @@ wdt_drv_status_t wdt_drv_init(uint32_t timeout_ms)
 #else
     clock_hz = BOARD_WDT_CLK_HZ;
 #endif
+    if (clock_hz == 0U)
+    {
+        /* Would divide by zero below, and a watchdog with a made-up timeout is worse than none. */
+        return WDT_DRV_ERR_INIT;
+    }
 
     /* The FSBL runs the SWDT during boot and should have stopped it at handoff. Make sure. */
     XWdtPs_Stop(&s_wdt_inst);
@@ -74,6 +84,11 @@ wdt_drv_status_t wdt_drv_init(uint32_t timeout_ms)
         const uint64_t counts = ((uint64_t)timeout_ms * clock_hz) / (1000ULL * s_prescalers[idx].divider);
         const uint64_t crv    = counts >> WDT_CRV_SHIFT;
 
+        /*
+         * Has to be checked here: XWdtPs_SetControlValue() shifts the CRV into
+         * place without masking it, so a larger value would spill into the
+         * CCR key field and the write would be ignored.
+         */
         if (crv > WDT_CRV_MAX)
         {
             continue;

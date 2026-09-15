@@ -32,6 +32,12 @@ static TaskHandle_t s_wdog_handle;
 /* Written by the supervisor only, read through task_watchdog_get_stats(). */
 static wdog_stats_t s_stats;
 
+/* Not portTICK_PERIOD_MS: that one is integer ms per tick and becomes 0 above 1000 Hz. */
+static uint32_t wdog_ticks_to_ms(TickType_t ticks)
+{
+    return (uint32_t)(((uint64_t)ticks * 1000ULL) / (uint64_t)configTICK_RATE_HZ);
+}
+
 #if (APP_WDT_TEST_COMMANDS != 0)
 static void wdog_test_hang(wdog_client_t client) __attribute__((noreturn));
 static void wdog_test_hang(wdog_client_t client)
@@ -98,7 +104,11 @@ static void wdog_task(void *task_arg)
 
         for (idx = 0U; idx < (uint32_t)WDOG_CLIENT_COUNT; idx++)
         {
-            const uint32_t silence_ms = (uint32_t)((now_tick - s_clients[idx].last_checkin_tick) * portTICK_PERIOD_MS);
+            /*
+             * No race with the client: nothing below this priority can run
+             * between reading now_tick and last_checkin_tick.
+             */
+            const uint32_t silence_ms = wdog_ticks_to_ms(now_tick - s_clients[idx].last_checkin_tick);
 
             if (silence_ms > s_stats.worst_silence_ms[idx])
             {
@@ -121,11 +131,14 @@ static void wdog_task(void *task_arg)
 
         if (late_client == WDOG_CLIENT_COUNT)
         {
-            wdt_drv_kick();
+            if (wdt_drv_is_running())
+            {
+                wdt_drv_kick();
 
-            taskENTER_CRITICAL();
-            s_stats.kicks++;
-            taskEXIT_CRITICAL();
+                taskENTER_CRITICAL();
+                s_stats.kicks++;
+                taskEXIT_CRITICAL();
+            }
         }
         else
         {
@@ -177,6 +190,11 @@ void task_watchdog_get_stats(wdog_stats_t *stats_out)
 const char *task_watchdog_client_name(wdog_client_t client)
 {
     return (client < WDOG_CLIENT_COUNT) ? s_clients[client].name : "?";
+}
+
+TaskHandle_t task_watchdog_handle(void)
+{
+    return s_wdog_handle;
 }
 
 #if (APP_WDT_TEST_COMMANDS != 0)

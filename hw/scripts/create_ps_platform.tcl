@@ -10,13 +10,13 @@
 # (AXI GPIO for SW0-3 / BTN0-3 etc.) comes after the firmware is finished.
 #
 # Usage, from the hw/ directory:
-#   vivado -mode batch -source scripts/create_ps_platform.tcl -tclargs zybo-z7-10
+#   vivado -mode batch -source scripts/create_ps_platform.tcl -tclargs zybo-z7-20
 #
-# Board argument: zybo | zybo-z7-10 | zybo-z7-20     (default: zybo-z7-10)
+# Board argument: zybo | zybo-z7-10 | zybo-z7-20     (default: zybo-z7-20)
 # The Digilent board files have to be installed for the preset to apply.
 #------------------------------------------------------------------------------
 
-set board_name [expr {[llength $argv] > 0 ? [lindex $argv 0] : "zybo-z7-10"}]
+set board_name [expr {[llength $argv] > 0 ? [lindex $argv 0] : "zybo-z7-20"}]
 
 set script_dir [file dirname [file normalize [info script]]]
 set hw_dir     [file normalize [file join $script_dir ..]]
@@ -45,23 +45,26 @@ apply_bd_automation -rule xilinx.com:bd_rule:processing_system7 \
     -config {make_external "FIXED_IO, DDR" apply_board_preset "1" Master "Disable" Slave "Disable"} $ps7
 
 # Nothing in the PL to talk to yet. Dropping GP0 avoids the validation error
-# about an undriven M_AXI_GP0_ACLK.
+# about an undriven M_AXI_GP0_ACLK, and the PL clock and reset the preset
+# turns on have nothing to drive either.
 #
-# TTC0 is the sample timer from stage 2 on. Set explicitly rather than relying
-# on the board preset having it on; its outputs stay on EMIO, unconnected.
+# TTC0 is the sample timer from stage 2 on, the system watchdog (SWDT) is used
+# from stage 4 on. Both are set explicitly, IO included - the GUI picks EMIO
+# when you tick them, Tcl doesn't. Their outputs stay unconnected.
 #
 # MIO50/51 (BTN4/BTN5) have pull-down resistors on the board. The Zybo Z7
 # preset leaves the Zynq's internal pull-ups on them enabled, which holds both
 # buttons at "pressed"; the original Zybo preset already disables them. The
 # firmware also clears these pull-ups at boot, so an XSA built without this
 # still works - this just keeps the hardware description honest.
-#
-# The system watchdog (SWDT) is used from stage 4 on. Its reset goes to the
-# PS internally, the EMIO outputs stay unconnected.
 set_property -dict [list \
     CONFIG.PCW_USE_M_AXI_GP0          {0} \
+    CONFIG.PCW_EN_CLK0_PORT           {0} \
+    CONFIG.PCW_EN_RST0_PORT           {0} \
     CONFIG.PCW_TTC0_PERIPHERAL_ENABLE {1} \
+    CONFIG.PCW_TTC0_TTC0_IO           {EMIO} \
     CONFIG.PCW_WDT_PERIPHERAL_ENABLE  {1} \
+    CONFIG.PCW_WDT_WDT_IO             {EMIO} \
     CONFIG.PCW_MIO_50_PULLUP          {disabled} \
     CONFIG.PCW_MIO_51_PULLUP          {disabled} \
 ] $ps7

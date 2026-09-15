@@ -18,6 +18,7 @@
 #include "task_watchdog.h"
 #include "uart_drv.h"
 #include "uptime.h"
+#include "wdt_drv.h"
 #include "xadc_drv.h"
 
 #define CONSUMER_NUM_BUF_LEN    16U
@@ -75,7 +76,7 @@ static void consumer_print_help(void)
                   "  d          diagnostics (timing, log, mutex, queue, watchdog, heap)\n"
 #if (APP_WDT_TEST_COMMANDS != 0)
                   "  1 2 3      watchdog test: hang the producer / ui / consumer task\n"
-                  "  4          watchdog test: interrupts off, whole system stops\n"
+                  "  4          watchdog test: kernel interrupts masked, whole system stops\n"
 #endif
                   "  h / ?      this help\n\n");
 }
@@ -95,13 +96,20 @@ static void consumer_run_wdt_test(char key)
         console_write("TEST: consumer stuck in a busy loop\n");
         break;
     case '4':
-        console_write("TEST: interrupts off, nothing runs any more\n");
+        console_write("TEST: kernel interrupts masked, nothing runs any more\n");
         break;
     default:
         return;
     }
 
-    console_write("expect the watchdog to reset the board within a few seconds\n");
+    if (wdt_drv_is_running())
+    {
+        console_write("expect the watchdog to reset the board within a few seconds\n");
+    }
+    else
+    {
+        console_write("SWDT is not running - this stays hung until the board is reset by hand\n");
+    }
     uart_drv_wait_tx_idle();
 
     switch (key)
@@ -117,7 +125,11 @@ static void consumer_run_wdt_test(char key)
         task_watchdog_inject_hang(WDOG_CLIENT_CONSUMER);
         break;
     default:
-        /* Nothing checks in and nothing kicks - only the SWDT itself can get out of this. */
+        /*
+         * Masks every interrupt the kernel uses, tick included, so the
+         * scheduler stops with this task spinning. Nothing checks in and
+         * nothing kicks - only the SWDT itself can get out of this.
+         */
         taskDISABLE_INTERRUPTS();
         for (;;)
         {
@@ -210,6 +222,7 @@ static void consumer_print_stats(void)
     sensor_log_stats_t      log_stats;
     uart_drv_err_counters_t uart_errs;
     wdog_stats_t            wdog_stats;
+    uint32_t                client;
     uintptr_t               log_base;
     uint32_t                log_bytes;
     const uint32_t          now_ms = uptime_ms();
@@ -270,28 +283,36 @@ static void consumer_print_stats(void)
 
 #if defined(INCLUDE_uxTaskGetStackHighWaterMark) && (INCLUDE_uxTaskGetStackHighWaterMark == 1)
     /* Minimum free stack seen so far, in words. Anything near zero needs a bigger stack. */
-    console_printf("  stack headroom  : producer %lu, ui %lu, consumer %lu words\n",
+    console_printf("  stack headroom  : watchdog %lu, producer %lu, ui %lu, consumer %lu words\n",
+                   (unsigned long)uxTaskGetStackHighWaterMark(task_watchdog_handle()),
                    (unsigned long)uxTaskGetStackHighWaterMark(task_producer_handle()),
                    (unsigned long)uxTaskGetStackHighWaterMark(task_ui_handle()),
                    (unsigned long)uxTaskGetStackHighWaterMark(NULL));
 #endif
 
     console_printf("  heap free       : %lu bytes\n", (unsigned long)xPortGetFreeHeapSize());
+    console_printf("  last reset      : %s\n", reset_cause_name(reset_cause_get()));
 
     task_watchdog_get_stats(&wdog_stats);
-    console_printf("  last reset      : %s\n", reset_cause_name(reset_cause_get()));
     if (wdog_stats.timeout_ms != 0U)
     {
-        console_printf("  watchdog        : SWDT %lu ms, %lu kicks, worst silence producer %lu / ui %lu / consumer %lu ms\n\n",
-                       (unsigned long)wdog_stats.timeout_ms, (unsigned long)wdog_stats.kicks,
-                       (unsigned long)wdog_stats.worst_silence_ms[WDOG_CLIENT_PRODUCER],
-                       (unsigned long)wdog_stats.worst_silence_ms[WDOG_CLIENT_UI],
-                       (unsigned long)wdog_stats.worst_silence_ms[WDOG_CLIENT_CONSUMER]);
+        console_printf("  watchdog        : SWDT %lu ms, %lu kicks\n",
+                       (unsigned long)wdog_stats.timeout_ms, (unsigned long)wdog_stats.kicks);
     }
     else
     {
-        console_write("  watchdog        : SWDT not running (APP_WDT_ENABLE)\n\n");
+        console_write("  watchdog        : SWDT not running (APP_WDT_ENABLE)\n");
     }
+
+    /* Worth watching when tuning the limits in app_config.h - they should be several times these. */
+    console_write("  worst silence   :");
+    for (client = 0U; client < (uint32_t)WDOG_CLIENT_COUNT; client++)
+    {
+        console_printf("%s %s %lu ms", (client == 0U) ? "" : ",",
+                       task_watchdog_client_name((wdog_client_t)client),
+                       (unsigned long)wdog_stats.worst_silence_ms[client]);
+    }
+    console_write("\n\n");
 }
 
 static void consumer_process_record(const sensor_record_t *record)

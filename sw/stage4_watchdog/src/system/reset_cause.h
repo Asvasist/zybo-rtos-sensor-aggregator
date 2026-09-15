@@ -13,7 +13,7 @@
 
 typedef enum
 {
-    RESET_CAUSE_UNKNOWN = 0,
+    RESET_CAUSE_UNKNOWN = 0,    /* no flag set - e.g. restarted by the debugger without a reset */
     RESET_CAUSE_POWER_ON,
     RESET_CAUSE_SWDT,           /* system watchdog - the one this firmware uses */
     RESET_CAUSE_CPU_WDT,        /* Cortex-A9 private watchdog */

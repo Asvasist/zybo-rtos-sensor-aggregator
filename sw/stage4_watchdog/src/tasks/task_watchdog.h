@@ -45,8 +45,9 @@ bool task_watchdog_create(void);
 /* Called by each client from its own task only. */
 void task_watchdog_checkin(wdog_client_t client);
 
-void        task_watchdog_get_stats(wdog_stats_t *stats_out);
-const char *task_watchdog_client_name(wdog_client_t client);
+void         task_watchdog_get_stats(wdog_stats_t *stats_out);
+const char  *task_watchdog_client_name(wdog_client_t client);
+TaskHandle_t task_watchdog_handle(void);
 
 #if (APP_WDT_TEST_COMMANDS != 0)
 /*
