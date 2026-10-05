@@ -10,7 +10,7 @@ progress. A small supervisor task is the only code allowed to kick it, and it
 only does that while the other three tasks keep checking in.
 
 The sensor log, mutex and queue haven't changed apart from the check-in calls,
-so for that side of things the stage 3 Readme is still the reference.
+so for that side of things the [stage 3 notes](../../docs/stage-3-ringbuffer-sync.md) are still the reference.
 
 ## What's new compared to stage 3
 
@@ -126,7 +126,7 @@ The SWDT has to be in the XSA, otherwise the build stops at `XPAR_XWDTPS_0_*`.
 
 ### Carrying on from the stage 3 Vivado project
 
-This assumes the project from the stage 3 walkthrough
+This assumes the project from the [stage 3 walkthrough](../../docs/stage-3-ringbuffer-sync.md)
 (`hw/build/zybo_ps_platform.xpr`, block design `ps_system`, Zybo Z7-20).
 
 1. Vivado 2025.2 > **Open Project** > `hw/build/zybo_ps_platform.xpr`.
@@ -199,7 +199,7 @@ C:\AMDDesignTools\2025.2\Vitis\bin\vitis.bat -s update_platform.py
 ```
 
 **Or start the components over.** Delete `sensor_app` and `zybo_platform`, and
-create them again from the new XSA exactly as in the stage 3 walkthrough. It
+create them again from the new XSA exactly as in the [stage 3 walkthrough](../../docs/stage-3-ringbuffer-sync.md). It
 takes a few minutes longer, but there's nothing to go wrong.
 
 To check it worked, look for `XPAR_XWDTPS_0_BASEADDR` in

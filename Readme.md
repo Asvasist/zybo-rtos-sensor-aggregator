@@ -19,21 +19,20 @@ What it covers:
 
 Firmware first, entirely on the PS. The PL design comes after.
 
-| Stage | Scope | Folder | Status |
-|-------|-------|--------|--------|
-| 1 | Bare-metal drivers: UART, MIO GPIO, XADC; temperature on the terminal | `sw/stage1_baremetal_drivers` | Code complete, builds against the 2025.2 BSP, board run pending |
-| 2 | FreeRTOS: timer-paced producer (100 ms XADC), consumer printing over UART | `sw/stage2_freertos_tasks` | Code complete, builds against the 2025.2 BSP, board run pending |
-| 3 | Ring buffer in DDR, mutex protection, queue between tasks | `sw/stage3_ringbuffer_sync` | First board run on a Zybo Z7-20 done, its two defects fixed, re-run pending |
-| 4 | Zynq system watchdog, supervisor task with per-task check-ins, reset cause | `sw/stage4_watchdog` | Code complete, built end to end with Vivado/Vitis 2025.2, board run pending |
-| 5 | PL design: AXI GPIO for SW0-3 / BTN0-3 | `hw/` | Later |
+| Stage | Scope | Code | Notes | Status |
+|-------|-------|------|-------|--------|
+| 1 | Bare-metal drivers: UART, MIO GPIO, XADC; temperature on the terminal | tag `stage-1` | [docs](docs/stage-1-baremetal-drivers.md) | Code complete, builds against the 2025.2 BSP, board run pending |
+| 2 | FreeRTOS: timer-paced producer (100 ms XADC), consumer printing over UART | tag `stage-2` | [docs](docs/stage-2-freertos-tasks.md) | Code complete, builds against the 2025.2 BSP, board run pending |
+| 3 | Ring buffer in DDR, mutex protection, queue between tasks | tag `stage-3` | [docs](docs/stage-3-ringbuffer-sync.md) | First board run on a Zybo Z7-20 done, its two defects fixed, re-run pending |
+| 4 | Zynq system watchdog, supervisor task with per-task check-ins, reset cause | `sw/stage4_watchdog` | [Readme](sw/stage4_watchdog/Readme.md) | Code complete, built end to end with Vivado/Vitis 2025.2, board run pending |
+| 5 | PL design: AXI GPIO for SW0-3 / BTN0-3 | `hw/` | | Later |
 
-Stage 4 is the complete firmware - everything from the earlier stages is in
-it. The earlier stage folders are kept as they were, so each step can still be
-built and read on its own.
+`sw/stage4_watchdog` is the complete firmware - everything from the earlier
+stages is in it. The code of an earlier stage is kept as a git tag
+(`git checkout stage-2`), its design notes under `docs/`.
 
-Each stage has its own Readme. The stage 3 Readme has the full Vivado/Vitis
-2025.2 walkthrough; the stage 4 Readme adds the watchdog, updating an existing
-platform, and booting from SD.
+The stage 3 notes have the full Vivado/Vitis 2025.2 walkthrough; the stage 4
+Readme adds the watchdog, updating an existing platform, and booting from SD.
 
 ## Quick start
 
@@ -41,8 +40,8 @@ platform, and booting from SD.
    `vivado -mode batch -source scripts/create_ps_platform.tcl -tclargs zybo-z7-20`.
    Or build it by hand - see the stage 4 Readme, *Hardware: enabling the watchdog*.
 2. **Vitis 2025.2.** Create a FreeRTOS platform for `ps7_cortexa9_0` from
-   `hw/export/zybo_ps_platform.xsa`, then an empty application on it (stage 3
-   Readme, *Running on the board*).
+   `hw/export/zybo_ps_platform.xsa`, then an empty application on it
+   ([stage 3 notes](docs/stage-3-ringbuffer-sync.md), *Running on the board*).
 3. **Sources.** Copy every `.c`/`.h` from `sw/stage4_watchdog/src` flat into the
    application's `src/` folder, build, and run. Terminal at 115200 8N1, `h` for
    the commands.
@@ -53,17 +52,9 @@ platform, and booting from SD.
 hw/
   Readme.md                      what the platform contains and why
   scripts/create_ps_platform.tcl PS-only Vivado project + XSA export
+docs/
+  stage-1..3 *.md                design notes of the earlier stages (code: tags stage-1..3)
 sw/
-  stage1_baremetal_drivers/
-    Readme.md
-    src/                         bare-metal application sources
-  stage2_freertos_tasks/
-    Readme.md
-    src/                         FreeRTOS application sources
-  stage3_ringbuffer_sync/
-    Readme.md                    design, 2025.2 board walkthrough, bring-up log
-    src/                         same layout as stage 4, without the watchdog
-    tests/host/                  unit tests that run on a PC
   stage4_watchdog/
     Readme.md                    watchdog, updating the platform, SD boot, tests
     src/
@@ -78,12 +69,12 @@ sw/
 ```
 
 Vitis 2025.2 only compiles sources that sit directly in an application's
-`src/` folder, so a stage's sources are copied in flat. The folders are for
+`src/` folder, so the sources are copied in flat. The folders are for
 reading the code; the includes are by file name, so flattening doesn't break
 anything.
 
-Drivers are carried forward from one stage to the next and changed in place.
-The commit history shows what changed and why.
+Drivers were carried forward from one stage to the next and changed in place;
+`git diff stage-3 stage-4` shows what each stage changed.
 
 Build outputs aren't tracked (Vivado project, XSA, Vitis workspace,
 `BOOT.BIN`); they're regenerated from the scripts and sources.

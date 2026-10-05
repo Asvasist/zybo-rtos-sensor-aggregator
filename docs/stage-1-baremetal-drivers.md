@@ -1,3 +1,5 @@
+> **Historical stage notes.** The code this page describes is in `sw/stage1_baremetal_drivers/` at git tag `stage-1` (`git checkout stage-1`). The current firmware is `sw/stage4_watchdog`.
+
 # Stage 1 - Bare-metal drivers (UART, GPIO, XADC)
 
 Status: **code complete, bring-up on the board pending**
@@ -107,7 +109,7 @@ this stage on the board is still to do.
 - XADC lookup in the SDT flow by base address 0 ("first instance").
 
 With Vitis 2025.2 (Unified IDE only) use the platform/application steps from
-`sw/stage3_ringbuffer_sync/Readme.md`, but choose **standalone** as the OS and
+[stage 3 notes](stage-3-ringbuffer-sync.md), but choose **standalone** as the OS and
 copy this stage's sources into the application's `src/` flat.
 
 ## Build and run

@@ -1,3 +1,5 @@
+> **Historical stage notes.** The code this page describes is in `sw/stage2_freertos_tasks/` at git tag `stage-2` (`git checkout stage-2`). The current firmware is `sw/stage4_watchdog`.
+
 # Stage 2 - FreeRTOS task architecture
 
 Status: **code complete, bring-up on the board pending**
@@ -215,7 +217,7 @@ platform; a run on the board is still to do.
 - XADC lookup in the SDT flow by base address 0 ("first instance").
 
 The full Vivado and Vitis 2025.2 walkthrough is in
-`sw/stage3_ringbuffer_sync/Readme.md`, and it applies to this stage unchanged.
+[stage 3 notes](stage-3-ringbuffer-sync.md), and it applies to this stage unchanged.
 
 ## Build and run
 

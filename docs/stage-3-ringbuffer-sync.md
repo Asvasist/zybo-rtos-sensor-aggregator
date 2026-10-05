@@ -1,3 +1,5 @@
+> **Historical stage notes.** The code this page describes is in `sw/stage3_ringbuffer_sync/` at git tag `stage-3` (`git checkout stage-3`). The current firmware is `sw/stage4_watchdog`.
+
 # Stage 3 - Ring buffer in DDR, mutex, message queue
 
 Status: **first board run done on a Zybo Z7-20 (Vivado/Vitis 2025.2). The two
