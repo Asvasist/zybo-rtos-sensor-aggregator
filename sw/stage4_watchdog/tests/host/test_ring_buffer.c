@@ -201,7 +201,7 @@ static uint32_t s_rand_state = 12345U;
 
 static uint32_t next_rand(void)
 {
-    s_rand_state = (s_rand_state * 1103515245UL) + 12345UL;
+    s_rand_state = (s_rand_state * 1103515245U) + 12345U;
     return s_rand_state >> 8;
 }
 
