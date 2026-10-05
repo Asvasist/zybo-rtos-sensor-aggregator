@@ -1,5 +1,7 @@
 # Zybo RTOS Sensor Aggregator
 
+[![ci](https://github.com/Asvasist/zybo-rtos-sensor-aggregator/actions/workflows/ci.yml/badge.svg)](https://github.com/Asvasist/zybo-rtos-sensor-aggregator/actions/workflows/ci.yml)
+
 A FreeRTOS sensor logger on the Digilent Zybo (Zynq-7000). A high-priority
 task samples the Zynq's on-chip XADC (die temperature and supply rails) and
 the board's PS push buttons on a hardware timer tick. It stores the samples in

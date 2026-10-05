@@ -1,0 +1,68 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: sw/stage4_watchdog
+
+jobs:
+  host-tests:
+    name: host unit tests (${{ matrix.name }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: strict warnings
+            flags: -O2
+          - name: ASan + UBSan
+            flags: -O1 -fsanitize=address,undefined -fno-omit-frame-pointer -fno-sanitize-recover=all
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build
+        run: |
+          gcc -std=c11 -g -Wall -Wextra -Wpedantic -Wconversion -Werror ${{ matrix.flags }} \
+              -Isrc/datalog -Isrc/drivers \
+              tests/host/test_ring_buffer.c src/datalog/ring_buffer.c -o test_ring_buffer
+      - name: Run
+        run: ./test_ring_buffer
+
+  static-analysis:
+    name: cppcheck + MISRA C:2012 report
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install cppcheck
+        run: sudo apt-get update && sudo apt-get install -y cppcheck
+      # Declarations at the top of a function are the house style (variableScope);
+      # the FreeRTOS stack overflow hook has to match the kernel's prototype.
+      - name: cppcheck (blocking)
+        run: |
+          cppcheck -q --std=c11 --error-exitcode=1 \
+                   --enable=warning,style,performance,portability \
+                   --suppress=missingIncludeSystem --suppress=missingInclude \
+                   --suppress=variableScope \
+                   --suppress='constParameterPointer:*rtos_hooks.c' \
+                   -Isrc/config -Isrc/datalog -Isrc/drivers -Isrc/system -Isrc/tasks src
+      - name: MISRA C:2012 report (non-blocking)
+        continue-on-error: true
+        run: |
+          cppcheck -q --std=c11 --addon=misra \
+                   --suppress=missingIncludeSystem --suppress=missingInclude \
+                   -Isrc/config -Isrc/datalog -Isrc/drivers -Isrc/system -Isrc/tasks \
+                   src 2> misra-report.txt || true
+          echo "MISRA findings: $(grep -c 'misra-c2012' misra-report.txt || true)"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: misra-report
+          path: sw/stage4_watchdog/misra-report.txt
+          if-no-files-found: ignore
